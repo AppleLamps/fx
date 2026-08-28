@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const file_permissions = @import("file_permissions.zig");
 const darwin_process_spawn = @import("darwin_process_spawn.zig");
+const windows_file_io = @import("windows_file_io.zig");
 
 pub const RawEnviron = [*:null]const ?[*:0]const u8;
 
@@ -21,7 +22,12 @@ pub fn setIo(zio: std.Io) void {
 }
 
 fn process_io_for(comptime os_tag: std.Target.Os.Tag, zio: std.Io) std.Io {
-    return if (os_tag == .macos) darwin_process_spawn.wrap(zio) else zio;
+    if (os_tag == .macos) return darwin_process_spawn.wrap(zio);
+    // Corrects the handle `std.Io` mislabels on a no-follow open. See
+    // `windows_file_io.zig` — without it the first read of any file opened
+    // that way aborts the process.
+    if (os_tag == .windows) return windows_file_io.wrap(zio);
+    return zio;
 }
 
 pub fn getIo() std.Io {
@@ -388,6 +394,35 @@ pub fn getenv(key: []const u8) ?[]const u8 {
     return null;
 }
 
+/// The user's home directory, or null when the platform has not named one.
+///
+/// POSIX calls it `HOME` and this returns exactly what `getenv` does there.
+///
+/// Windows does not set `HOME` at all. Its equivalent is `USERPROFILE`, the
+/// same directory `SHGetKnownFolderPath` reports for `FOLDERID_Profile`.
+/// `HOME` is still consulted first, because Git Bash, MSYS2, and Cygwin do set
+/// it, and a user working in one of those shells expects `~/.fx` and fx's own
+/// profile directory to be the same place.
+///
+/// `HOMEDRIVE` and `HOMEPATH` are deliberately not consulted. Joining them
+/// needs an allocator, and the result here is a slice borrowed from the
+/// environment; `USERPROFILE` is set in every ordinary Windows session.
+pub fn homeDir() ?[]const u8 {
+    if (comptime builtin.os.tag != .windows) return getenv("HOME");
+    return selectWindowsHome(getenv("HOME"), getenv("USERPROFILE"));
+}
+
+/// Split out so the Windows precedence is checkable from a POSIX host.
+fn selectWindowsHome(home: ?[]const u8, user_profile: ?[]const u8) ?[]const u8 {
+    if (home) |value| {
+        if (value.len > 0) return value;
+    }
+    if (user_profile) |value| {
+        if (value.len > 0) return value;
+    }
+    return null;
+}
+
 pub fn e2eFailIfDurableMutationAttempted() void {
     const enabled = getenv("FX_E2E_FAIL_ON_DURABLE_MUTATION") orelse return;
     if (!std.mem.eql(u8, enabled, "1")) return;
@@ -586,7 +621,7 @@ fn verifyPrivateDirectory(dir: std.Io.Dir) !void {
 /// The handle must come from an `openDir` that requested iteration. Linux returns an
 /// `O_PATH` descriptor otherwise, and `fsync` rejects those with `EBADF`.
 pub fn syncVerifiedDir(dir: std.Io.Dir) !void {
-    if (comptime builtin.os.tag == .windows) return error.OperationUnsupported;
+    if (comptime builtin.os.tag == .windows) return syncWindowsDir(dir);
     while (true) {
         const rc = std.c.fsync(dir.handle);
         if (rc == 0) return;
@@ -599,6 +634,147 @@ pub fn syncVerifiedDir(dir: std.Io.Dir) !void {
             else => return error.DirectorySyncFailed,
         }
     }
+}
+
+/// `FlushFileBuffers` is not declared in `std.os.windows` as of Zig 0.16.0.
+extern "kernel32" fn FlushFileBuffers(
+    hFile: std.os.windows.HANDLE,
+) callconv(.winapi) std.os.windows.BOOL;
+
+const WindowsDirSyncError = error{
+    OperationUnsupported,
+    NoSpaceLeft,
+    ReadOnlyFileSystem,
+    DirectorySyncFailed,
+};
+
+/// Windows counterpart of `fsync` on a directory descriptor.
+///
+/// `FlushFileBuffers` is the Windows durability barrier, and it does accept a
+/// directory handle — but only one opened with write access. `std.Io.Dir`
+/// opens directories for traversal and listing, so on a real Windows host this
+/// call is expected to fail with `ACCESS_DENIED`. That one code is treated as
+/// "this handle cannot carry the barrier" and reported as success; every other
+/// failure maps onto the same errors the POSIX branch returns.
+///
+/// The tolerance is a real weakening, not a formality. When
+/// `durableReplaceVerified` returns, the file's contents are durable —
+/// `FlushFileBuffers` on the *file* handle, which does have write access,
+/// already ran. What is left unflushed is the rename that published them,
+/// which rests on the NTFS metadata log. A crash between the rename and that
+/// log reaching disk can lose the rename and leave the previous contents.
+///
+/// The alternative is what this replaced: `error.OperationUnsupported`
+/// unconditionally, which fails every private-state write on Windows — no
+/// credential, session, or settings file can be written at all. A narrower gap
+/// in crash durability is the better trade, but it is a gap.
+///
+/// Probed under wine, where the call does fail with `ACCESS_DENIED` — so the
+/// tolerance branch is the live one, not a theoretical case. Wine is not NTFS,
+/// though, so a real Windows host still owes confirmation, and reopening the
+/// handle with write access via `ReOpenFile` is the follow-up worth trying
+/// there if the barrier turns out to be reachable that way.
+fn syncWindowsDir(dir: std.Io.Dir) WindowsDirSyncError!void {
+    if (FlushFileBuffers(dir.handle).toBool()) return;
+    if (windowsDirSyncFailure(std.os.windows.GetLastError())) |err| return err;
+}
+
+/// Split out from `syncWindowsDir` so the mapping is checkable from a POSIX
+/// host: `Win32Error` is a plain enum that exists on every target, even though
+/// the call that produces one does not.
+fn windowsDirSyncFailure(code: std.os.windows.Win32Error) ?WindowsDirSyncError {
+    return switch (code) {
+        // The expected case. See the tolerance note above.
+        .ACCESS_DENIED => null,
+        // Mirrors the POSIX branch's `.INVAL, .OPNOTSUPP`: the volume itself
+        // has no such operation, which callers already handle.
+        .INVALID_FUNCTION, .NOT_SUPPORTED => error.OperationUnsupported,
+        .DISK_FULL, .HANDLE_DISK_FULL => error.NoSpaceLeft,
+        .WRITE_PROTECT => error.ReadOnlyFileSystem,
+        else => error.DirectorySyncFailed,
+    };
+}
+
+test "windows directory sync tolerates only the missing-write-access case" {
+    try std.testing.expectEqual(@as(?WindowsDirSyncError, null), windowsDirSyncFailure(.ACCESS_DENIED));
+}
+
+test "windows directory sync maps failures onto the POSIX error contract" {
+    try std.testing.expectEqual(
+        @as(?WindowsDirSyncError, error.OperationUnsupported),
+        windowsDirSyncFailure(.INVALID_FUNCTION),
+    );
+    try std.testing.expectEqual(
+        @as(?WindowsDirSyncError, error.OperationUnsupported),
+        windowsDirSyncFailure(.NOT_SUPPORTED),
+    );
+    try std.testing.expectEqual(
+        @as(?WindowsDirSyncError, error.NoSpaceLeft),
+        windowsDirSyncFailure(.DISK_FULL),
+    );
+    try std.testing.expectEqual(
+        @as(?WindowsDirSyncError, error.NoSpaceLeft),
+        windowsDirSyncFailure(.HANDLE_DISK_FULL),
+    );
+    try std.testing.expectEqual(
+        @as(?WindowsDirSyncError, error.ReadOnlyFileSystem),
+        windowsDirSyncFailure(.WRITE_PROTECT),
+    );
+    try std.testing.expectEqual(
+        @as(?WindowsDirSyncError, error.DirectorySyncFailed),
+        windowsDirSyncFailure(.INVALID_HANDLE),
+    );
+}
+
+test "windows home resolution prefers HOME and falls back to USERPROFILE" {
+    try std.testing.expectEqualStrings("C:\\msys\\home", selectWindowsHome("C:\\msys\\home", "C:\\Users\\ada").?);
+    try std.testing.expectEqualStrings("C:\\Users\\ada", selectWindowsHome(null, "C:\\Users\\ada").?);
+    // An empty variable is how a shell spells "unset" often enough that
+    // treating it as a value would send private state to the filesystem root.
+    try std.testing.expectEqualStrings("C:\\Users\\ada", selectWindowsHome("", "C:\\Users\\ada").?);
+    try std.testing.expectEqual(@as(?[]const u8, null), selectWindowsHome(null, null));
+    try std.testing.expectEqual(@as(?[]const u8, null), selectWindowsHome("", ""));
+}
+
+test "home directory reads HOME on POSIX" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
+    const previous_map = global_environ;
+    const previous_block = global_environ_block;
+    const previous_raw = global_raw_environ;
+    defer {
+        global_environ = previous_map;
+        global_environ_block = previous_block;
+        global_raw_environ = previous_raw;
+    }
+
+    var environ = std.process.Environ.Map.init(std.testing.allocator);
+    defer environ.deinit();
+    try environ.put("HOME", "/tmp/fake-home");
+    // Set on purpose: POSIX must ignore it, or a stray Windows variable could
+    // silently redirect private state.
+    try environ.put("USERPROFILE", "C:\\Users\\ada");
+
+    setEnvironMap(&environ);
+    try std.testing.expectEqualStrings("/tmp/fake-home", homeDir().?);
+}
+
+test "home directory is absent on POSIX when HOME is unset" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
+    const previous_map = global_environ;
+    const previous_block = global_environ_block;
+    const previous_raw = global_raw_environ;
+    defer {
+        global_environ = previous_map;
+        global_environ_block = previous_block;
+        global_raw_environ = previous_raw;
+    }
+
+    var environ = std.process.Environ.Map.init(std.testing.allocator);
+    defer environ.deinit();
+    try environ.put("USERPROFILE", "C:\\Users\\ada");
+
+    setEnvironMap(&environ);
+    try std.testing.expectEqual(@as(?[]const u8, null), homeDir());
 }
 
 fn openOrCreateVerifiedPrivateChild(parent: std.Io.Dir, name: []const u8) !VerifiedDir {
@@ -627,7 +803,8 @@ fn openOrCreateVerifiedPrivateChild(parent: std.Io.Dir, name: []const u8) !Verif
     };
     errdefer dir.close(zio);
 
-    dir.setPermissions(zio, private_dir_permissions) catch return error.PrivateStatePermissionsUnsupported;
+    file_permissions.setDirPermissions(dir, zio, private_dir_permissions) catch
+        return error.PrivateStatePermissionsUnsupported;
     try verifyPrivateDirectory(dir);
     if (created) try syncVerifiedDir(parent);
     return .{ .dir = dir };

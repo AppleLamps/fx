@@ -86,6 +86,32 @@ pub fn isExactlyPrivateDir(permissions: Permissions) bool {
     return permissions.toMode() & 0o777 == 0o700;
 }
 
+pub const SetPermissionsError = std.Io.Dir.SetPermissionsError;
+
+/// Applies directory permissions, or does nothing on Windows.
+///
+/// `std.Io.Dir.setPermissions` is `@panic("TODO implement
+/// dirSetPermissionsWindows")` in Zig 0.16.0. That is an unimplemented std
+/// function rather than an error, so the `catch` every caller already wraps it
+/// in cannot absorb it and the process aborts instead. Routing through here
+/// turns the abort back into the outcome those callers were written for.
+///
+/// Nothing is lost that `verifies_confidentiality` does not already record:
+/// Windows `Permissions` carries no owner/group/other classes to apply.
+///
+/// The file counterpart needs no seam. `std.Io.File.setPermissions` is
+/// implemented on Windows, and `private_file` is `.default_file`, which is
+/// zero — the value `NtSetInformationFile` reads as "leave the attributes
+/// alone".
+pub fn setDirPermissions(
+    dir: std.Io.Dir,
+    zio: std.Io,
+    permissions: Permissions,
+) SetPermissionsError!void {
+    if (comptime is_windows) return;
+    return dir.setPermissions(zio, permissions);
+}
+
 /// Opaque platform-specific permission bits, for recording in a durable
 /// fingerprint and comparing against a later observation of the same file.
 /// Never interpret the result as mode bits; only compare it for equality.

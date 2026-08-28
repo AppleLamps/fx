@@ -1,9 +1,20 @@
 # Windows platform port — scope, sequencing, and phase plan
 
-Status: phases 0 through 2 are implemented; see the phase reports linked
-below. Phase 2 is not verified end to end. This document remains the plan of
-record for the scope and sequencing; the code lives in the tree.
+Status: phases 0 through 3 are implemented; see the phase reports linked
+below. Phases 2 and 3 are not verified end to end. This document remains the
+plan of record for the scope and sequencing; the code lives in the tree.
 
+> **Phase 3 has landed for credential storage only.** `fx.exe` reads a stored
+> API key on Windows — the first file this program has ever read there. OAuth
+> browser sign-in did not land, and the blocker is below fx: Zig 0.16 drives
+> Windows sockets through undocumented AFD IOCTLs, so the readiness poll the
+> accept loop is built on has no Windows instrument, and no `std.Io.net`
+> operation runs under wine at all. See
+> [`windows-port-phase3.md`](windows-port-phase3.md), which also corrects this
+> document on two points: phase 1's "config read/write works" was never
+> exercised, and a no-follow `openFile` returns a handle Zig's own reader
+> aborts on — 42 call sites, fixed by one flag.
+>
 > **Phase 2 has landed but is not verified end to end.** Job Objects, the
 > PowerShell strategy, and Windows foreground execution are implemented, and
 > `fx.exe` runs under wine — but the changed happy path, a command actually
@@ -261,6 +272,15 @@ OAuth browser handoff (Phase 1's `url_opener` arm), the profile-file token
 store on Phase 1's private-state model, refresh, and logout.
 
 Exit: both login flows complete on Windows.
+
+**Revised by the phase 3 report.** Only the API-key flow is unblocked. The
+`url_opener` arm landed, but the loopback listener that receives the OAuth
+callback cannot be built on `WSAPoll` as this plan assumed — Windows sockets in
+Zig 0.16 are AFD handles, not ws2_32 sockets. Refresh and logout are
+OAuth-shaped and remain unexercised. The store half of the API-key flow is
+verified by its primitives rather than end to end, because wine does not
+implement `NtLockFile`. See
+[`windows-port-phase3.md`](windows-port-phase3.md).
 
 ### Phase 4 — interactive terminal (ConPTY)
 

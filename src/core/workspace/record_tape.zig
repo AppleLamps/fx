@@ -107,7 +107,7 @@ fn configureAutomatic(
     initial_rows: u16,
     fx_version: []const u8,
 ) !void {
-    const home = if (io_mod.getenv("HOME")) |value| blk: {
+    const home = if (io_mod.homeDir()) |value| blk: {
         const trimmed = std.mem.trim(u8, value, " \t\r\n");
         break :blk if (trimmed.len > 0) trimmed else null;
     } else null;

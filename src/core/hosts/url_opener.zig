@@ -54,9 +54,21 @@ fn launchUrl(
 ) LaunchOutcome {
     var macos_argv = [_][]const u8{ "open", url };
     var linux_argv = [_][]const u8{ "xdg-open", url };
+    // `rundll32 url.dll,FileProtocolHandler` hands the URL straight to the
+    // default protocol handler with no shell in between.
+    //
+    // `cmd /c start` is the more familiar spelling and the wrong one here.
+    // `start` reads a leading quoted argument as a window title, and `cmd`
+    // re-parses the command line under rules that are not the ones Zig quotes
+    // for — so an OAuth URL, which always carries `&` between query
+    // parameters, would pass through two disagreeing quoting layers instead of
+    // none. `explorer.exe` opens the URL correctly but exits nonzero doing it,
+    // which this function reads as failure.
+    var windows_argv = [_][]const u8{ "rundll32.exe", "url.dll,FileProtocolHandler", url };
     const argv: []const []const u8 = switch (os_tag) {
         .macos => &macos_argv,
         .linux => &linux_argv,
+        .windows => &windows_argv,
         else => return .unsupported,
     };
 
@@ -116,13 +128,39 @@ test "url opener selects the platform launcher argv" {
     defer linux.deinit(alloc);
     try std.testing.expectEqual(LaunchOutcome.opened, launchUrl(alloc, "http://localhost:3000", .linux, linux.launcher()));
     try std.testing.expectEqualStrings("xdg-open http://localhost:3000", linux.argv_joined.items);
+
+    var windows = MockLauncher{};
+    defer windows.deinit(alloc);
+    try std.testing.expectEqual(LaunchOutcome.opened, launchUrl(alloc, "http://localhost:3000", .windows, windows.launcher()));
+    try std.testing.expectEqualStrings(
+        "rundll32.exe url.dll,FileProtocolHandler http://localhost:3000",
+        windows.argv_joined.items,
+    );
+}
+
+test "url opener passes an OAuth query string through as one argument" {
+    // The reason `cmd /c start` is not used: every parameter separator here is
+    // a `cmd` metacharacter. The URL has to reach the launcher as a single
+    // argv element, unsplit and unquoted by anything in between.
+    const alloc = std.testing.allocator;
+    const url = "http://localhost:3000/callback?code=abc&state=xyz&scope=a%20b";
+
+    var windows = MockLauncher{};
+    defer windows.deinit(alloc);
+    try std.testing.expectEqual(LaunchOutcome.opened, launchUrl(alloc, url, .windows, windows.launcher()));
+    try std.testing.expectEqualStrings(
+        "rundll32.exe url.dll,FileProtocolHandler " ++ url,
+        windows.argv_joined.items,
+    );
 }
 
 test "url opener reports unsupported platforms without launching" {
+    // This used `.windows` until Windows gained an arm. The assertion is about
+    // the `else` prong, so it needs a target that still has no launcher.
     const alloc = std.testing.allocator;
     var mock = MockLauncher{};
     defer mock.deinit(alloc);
-    try std.testing.expectEqual(LaunchOutcome.unsupported, launchUrl(alloc, "http://x", .windows, mock.launcher()));
+    try std.testing.expectEqual(LaunchOutcome.unsupported, launchUrl(alloc, "http://x", .freebsd, mock.launcher()));
     try std.testing.expectEqualStrings("", mock.argv_joined.items);
 }
 

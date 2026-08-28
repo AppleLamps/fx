@@ -108,7 +108,8 @@ pub fn execute(arena: Allocator, args_json: []const u8) ![]u8 {
 fn runMemory(alloc: Allocator, action: []const u8, fact: ?[]const u8) ![]u8 {
     if (!isSupportedAction(action)) return error.UnsupportedMemoryAction;
 
-    const home = io_mod.getenv("HOME") orelse return std.fmt.allocPrint(alloc, "memory unavailable: HOME not set", .{});
+    const home = io_mod.homeDir() orelse
+        return std.fmt.allocPrint(alloc, "memory unavailable: no home directory (HOME, or USERPROFILE on Windows)", .{});
     const memories_path = try profile_paths.memoriesPath(alloc, home);
     defer alloc.free(memories_path);
 
@@ -419,7 +420,7 @@ test "memory owner preserves active output behavior" {
     const alloc = std.testing.allocator;
     try setTestHome(null);
     defer setTestHome(null) catch {};
-    try expectMemoryOutput("{\"action\":\"list\"}", "memory unavailable: HOME not set");
+    try expectMemoryOutput("{\"action\":\"list\"}", "memory unavailable: no home directory (HOME, or USERPROFILE on Windows)");
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

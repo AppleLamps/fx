@@ -390,7 +390,7 @@ pub fn run(alloc: Allocator, config: Config) !void {
 }
 
 fn runSupported(alloc: Allocator, config: Config) !void {
-    const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+    const home = io_mod.homeDir() orelse return error.HomeNotSet;
     var paths = try Paths.open(alloc, home);
     defer paths.deinit(alloc);
 

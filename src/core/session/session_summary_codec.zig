@@ -2303,7 +2303,10 @@ test "deferred cache token reader rejects non-private files" {
         "non-private-token",
         encoded,
     );
-    var file = try deferred.dir.openFile(std.testing.io, "non-private-token", .{
+    // `io_mod.getIo()` rather than `std.testing.io`: a no-follow open needs the
+    // wrapper in `windows_file_io`, and only `getIo` installs it. Identical on
+    // POSIX, where the wrapper is the identity.
+    var file = try deferred.dir.openFile(io_mod.getIo(), "non-private-token", .{
         .mode = .read_write,
         .follow_symlinks = false,
         .resolve_beneath = true,

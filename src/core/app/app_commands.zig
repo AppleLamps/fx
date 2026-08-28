@@ -1139,7 +1139,7 @@ pub fn Handlers(comptime App: type) type {
         }
 
         fn requestUsageDashboardRefresh(app: *App) !void {
-            const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+            const home = io_mod.homeDir() orelse return error.HomeNotSet;
             const availability = try app.session.ensureProfileUsageReadable(
                 app.alloc,
                 home,
@@ -1194,7 +1194,7 @@ pub fn Handlers(comptime App: type) type {
             if (scope == .session) {
                 return app.session.usage.reportSnapshot(app.alloc);
             }
-            const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+            const home = io_mod.homeDir() orelse return error.HomeNotSet;
             const availability = try app.session.ensureProfileUsageReadable(
                 app.alloc,
                 home,
@@ -1276,7 +1276,7 @@ pub fn Handlers(comptime App: type) type {
         fn commandHandleMcp(ctx: *anyopaque, rest: []const u8) !void {
             const app: *App = @ptrCast(@alignCast(ctx));
             const result = try app.mcpCommandProvider().handle(app.alloc, rest, .{
-                .home = io_mod.getenv("HOME"),
+                .home = io_mod.homeDir(),
                 .list_ctx = @ptrCast(app),
                 .summarize_servers = summarizeMcpServers,
                 .list_servers_and_tools = listMcpServersAndTools,

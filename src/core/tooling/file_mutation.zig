@@ -2708,7 +2708,10 @@ fn mutateAfterStage(
         replacement.writeStreamingAll(std.testing.io, "foreign") catch return error.TestControlFailed;
     }
     if (state.mutate_temp) {
-        var staged = parent.openFile(std.testing.io, temp_name, .{
+        // `io_mod.getIo()` rather than `std.testing.io`: a no-follow open needs
+        // the wrapper in `windows_file_io`, and only `getIo` installs it.
+        // Identical on POSIX, where the wrapper is the identity.
+        var staged = parent.openFile(io_mod.getIo(), temp_name, .{
             .mode = .write_only,
             .follow_symlinks = false,
             .resolve_beneath = true,
