@@ -5,6 +5,7 @@ const debug_trace = @import("../shared/debug_trace.zig");
 const command_contract = @import("command_contract.zig");
 const command_environment = @import("command_environment.zig");
 const process_tree = @import("process_tree.zig");
+const windows_job = @import("windows_job.zig");
 const background_process_provider = @import(
     "background_process_provider.zig",
 );
@@ -1322,6 +1323,21 @@ fn executeProcessWithScriptUnisolated(
     script: []const u8,
 ) !CollectedProcess {
     const started_ms = io_mod.milliTimestamp();
+
+    // Windows has no process groups, so the `pgid` isolation above is a no-op
+    // there. A Job Object provides the same containment: descendants inherit
+    // membership, and because the job is created with
+    // `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, closing it on the way out of this
+    // function tears down anything the ordinary termination path missed.
+    const job: ?windows_job.Job = if (comptime windows_job.supported)
+        windows_job.Job.create() catch |err| blk: {
+            debug_trace.logf("core", "job object unavailable err={s}", .{@errorName(err)});
+            break :blk null;
+        }
+    else
+        null;
+    defer if (job) |owned| owned.close();
+
     var child = try std.process.spawn(io_mod.getIo(), .{
         .argv = argv,
         .stdin = .pipe,
@@ -1330,6 +1346,14 @@ fn executeProcessWithScriptUnisolated(
         .cwd = .{ .path = cwd },
         .pgid = if (builtin.os.tag != .windows and builtin.os.tag != .wasi) 0 else null,
     });
+
+    if (comptime windows_job.supported) {
+        if (job) |owned| {
+            if (child.id) |handle| owned.assign(handle) catch |err| {
+                debug_trace.logf("core", "job assignment failed err={s}", .{@errorName(err)});
+            };
+        }
+    }
 
     var output = OutputCollector.init(scratch, cfg);
     defer output.deinit();
@@ -1589,7 +1613,7 @@ fn executeRawInvocation(
     cwd: []const u8,
     invocation: *const shell_resolver.Invocation,
 ) !command_contract.RunCommandResult {
-    if (builtin.os.tag == .windows or builtin.os.tag == .wasi) {
+    if (builtin.os.tag == .wasi) {
         return error.InvalidCommandEnvironment;
     }
     const result = try executeProcessWithScript(
