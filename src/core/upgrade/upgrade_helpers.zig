@@ -13,6 +13,10 @@ const Channel = update_target.Channel;
 const Target = update_target.Target;
 
 fn setRecvTimeout(conn: *std.http.Client.Connection) void {
+    // `std.posix.setsockopt` refuses to compile for Windows in Zig 0.16.0
+    // ("use std.Io instead"). The fetch still works; it just relies on the
+    // client's own timeout handling.
+    if (comptime builtin.os.tag == .windows) return;
     const sock = conn.stream_writer.stream.socket.handle;
     const timeout = std.posix.timeval{ .sec = recv_timeout_sec, .usec = 0 };
     std.posix.setsockopt(sock, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout)) catch {};
@@ -47,12 +51,20 @@ fn isLoopbackE2eUpgradeBase(url: []const u8) bool {
 }
 
 pub const platform = platformFromTarget() orelse
-    @compileError("unsupported platform for auto-upgrade (requires macOS or Linux, x86_64 or aarch64)");
+    @compileError("unsupported platform for auto-upgrade (requires macOS, Linux, or Windows, x86_64 or aarch64)");
+
+/// Whether a release artifact is actually published for this platform. False
+/// on Windows until phase 5 adds it to the release matrix.
+pub const supports_published_artifact = builtin.os.tag != .windows;
 
 fn platformFromTarget() ?[]const u8 {
     const os: ?[]const u8 = switch (builtin.os.tag) {
         .macos => "macos",
         .linux => "linux",
+        // No Windows release artifact is published yet, so an upgrade attempt
+        // fails as a download error until phase 5 adds one and reconciles the
+        // archive extension. See `supports_published_artifact`.
+        .windows => "windows",
         else => null,
     };
     const arch: ?[]const u8 = switch (builtin.cpu.arch) {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const types = @import("../../core/shared/types.zig");
 
 pub const interactive_mode_enable_sequence = "\x1b[>4;2m\x1b[>1u\x1b[?2004h\x1b[?7l";
@@ -34,6 +35,10 @@ pub fn interactiveModeEnableSequence(tmux: ?[]const u8) []const u8 {
 }
 
 pub fn queryLayout(fd: std.posix.fd_t, footer_rows: u16) !types.Layout {
+    // TIOCGWINSZ has no Windows equivalent; the console size comes from
+    // GetConsoleScreenBufferInfo, which arrives with the ConPTY backend in
+    // phase 4. Until then Windows reports no usable terminal geometry.
+    if (comptime builtin.os.tag == .windows) return error.UnableToReadTerminalSize;
     var ws: std.posix.winsize = .{ .row = 0, .col = 0, .xpixel = 0, .ypixel = 0 };
 
     const req: c_int = @intCast(std.c.T.IOCGWINSZ);

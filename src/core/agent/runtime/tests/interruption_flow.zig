@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../../../shared/file_permissions.zig");
 const builtin_tools = @import("../../../../builtins/tools.zig");
 const model_tool_schema = @import("../../../tooling/model_tool_schema.zig");
 const types = @import("../../../shared/types.zig");
@@ -495,7 +496,7 @@ test "processQueuedPrompt retains cancelled command replay in interrupted histor
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        file_permissions.private_dir,
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const debug_trace = @import("../shared/debug_trace.zig");
 const io_mod = @import("../shared/io.zig");
 
@@ -134,6 +135,15 @@ fn listenerReady(
     cancel_flag: *std.atomic.Value(bool),
 ) !bool {
     if (cancel_flag.load(.seq_cst)) return error.Cancelled;
+    // `poll` is POSIX-only and `std.c.pollfd` does not exist for Windows, so
+    // the loopback OAuth listener cannot be polled there. Reporting "not
+    // ready" rather than a new error keeps the error set identical across
+    // targets; the caller times out. The cancel check is kept so `Cancelled`
+    // stays in the inferred set. Browser-callback sign-in is phase 3 work.
+    if (comptime builtin.os.tag == .windows) {
+        if (cancel_flag.load(.seq_cst)) return error.Cancelled;
+        return false;
+    }
     var fds = [_]std.posix.pollfd{.{
         .fd = listener.socket.handle,
         .events = std.posix.POLL.IN,
@@ -153,6 +163,12 @@ fn requestReadable(
     cancel_flag: *std.atomic.Value(bool),
     deadline_ms: i64,
 ) !bool {
+    // As in `listenerReady`: report "not ready" so the error set is
+    // unchanged across targets and the caller times out.
+    if (comptime builtin.os.tag == .windows) {
+        if (cancel_flag.load(.seq_cst)) return error.Cancelled;
+        return false;
+    }
     while (true) {
         if (cancel_flag.load(.seq_cst)) return error.Cancelled;
         const remaining_ms = deadline_ms - io_mod.milliTimestamp();
@@ -331,6 +347,10 @@ fn writePreflightResponse(stream: std.Io.net.Stream, origin: []const u8) !void {
 }
 
 fn setSocketTimeouts(socket: std.posix.socket_t) void {
+    // `std.c.setsockopt` resolves to the libc symbol, which does not exist on
+    // Windows: sockets there live in ws2_32. Browser-callback sign-in is
+    // phase 3 work, so the timeouts are simply not applied.
+    if (comptime builtin.os.tag == .windows) return;
     const timeout = std.posix.timeval{ .sec = socket_timeout_seconds, .usec = 0 };
     const receive_rc = std.c.setsockopt(
         socket,
@@ -406,6 +426,9 @@ const ResetPreconnectProbe = struct {
     failed: std.atomic.Value(bool) = .init(false),
 
     fn run(self: *ResetPreconnectProbe) void {
+        // This test probe forces a TCP reset via SO_LINGER, which
+        // `std.posix.setsockopt` cannot do on Windows.
+        if (comptime builtin.os.tag == .windows) return self.finish(true);
         const io = io_mod.getIo();
         var address = std.Io.net.IpAddress.parse("127.0.0.1", self.port) catch
             return self.finish(true);

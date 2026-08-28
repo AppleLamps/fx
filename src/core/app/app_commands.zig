@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../shared/file_permissions.zig");
 const runtime_profile = @import("../hosts/runtime_profile.zig");
 const app_permission_runtime = @import("app_permission_runtime.zig");
 const app_session_runtime = @import("app_session_runtime.zig");
@@ -2011,7 +2012,7 @@ fn traceFilePermissions() std.Io.File.Permissions {
     const builtin = @import("builtin");
     return switch (builtin.os.tag) {
         .windows => .default_file,
-        else => std.Io.File.Permissions.fromMode(0o600),
+        else => file_permissions.private_file,
     };
 }
 
@@ -2237,8 +2238,14 @@ fn writeCurrentStateSummary(writer: *std.Io.Writer, app: anytype, alloc: std.mem
 }
 
 fn writeProcessSummary(writer: *std.Io.Writer, alloc: std.mem.Allocator) !void {
+    const builtin = @import("builtin");
     const pid = std.c.getpid();
-    try writer.print("process: pid={d}", .{pid});
+    // `std.c.getpid` yields a HANDLE on Windows, which has no decimal form.
+    if (comptime builtin.os.tag == .windows) {
+        try writer.print("process: pid={d}", .{std.os.windows.GetCurrentProcessId()});
+    } else {
+        try writer.print("process: pid={d}", .{pid});
+    }
     if (countOpenFileDescriptors()) |fd_count| try writer.print(" open_fds={d}", .{fd_count});
     try writer.writeByte('\n');
 
@@ -2278,6 +2285,9 @@ fn countOpenFileDescriptors() ?usize {
 }
 
 fn processMemorySnapshot(alloc: std.mem.Allocator, pid: std.c.pid_t) ![]u8 {
+    // `ps` is POSIX-only and a Windows pid is a HANDLE with no decimal form.
+    // The caller treats a failure here as "no snapshot available".
+    if (comptime @import("builtin").os.tag == .windows) return error.Unsupported;
     const pid_text = try std.fmt.allocPrint(alloc, "{d}", .{pid});
     defer alloc.free(pid_text);
     const result = try std.process.run(alloc, io_mod.getIo(), .{

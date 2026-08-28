@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../shared/file_permissions.zig");
 const builtin = @import("builtin");
 const mcp_auth = @import("mcp_auth.zig");
 const native_keychain = @import("../hosts/native_keychain.zig");
@@ -480,15 +481,15 @@ fn openExistingPrivateChild(
 fn normalizeAndVerifyPrivateDir(dir: std.Io.Dir) !void {
     const initial = try dir.stat(io_mod.getIo());
     if (initial.kind != .directory) return error.DurablePathUnsafe;
-    if (initial.permissions.toMode() & 0o200 == 0) {
+    if (!file_permissions.isOwnerWritable(initial.permissions)) {
         return error.PrivateStatePermissionsUnsupported;
     }
     try dir.setPermissions(
         io_mod.getIo(),
-        std.Io.File.Permissions.fromMode(0o700),
+        file_permissions.private_dir,
     );
     const stat = try dir.stat(io_mod.getIo());
-    if (stat.kind != .directory or stat.permissions.toMode() & 0o777 != 0o700) {
+    if (stat.kind != .directory or !file_permissions.isExactlyPrivateDir(stat.permissions)) {
         return error.PrivateStatePermissionsUnsupported;
     }
 }
@@ -564,7 +565,7 @@ fn loadFromDir(alloc: Allocator, dir: *io_mod.VerifiedDir) !?Store {
     defer file.close(io_mod.getIo());
     const stat = try file.stat(io_mod.getIo());
     if (stat.kind != .file or stat.nlink != 1) return error.DurablePathUnsafe;
-    if (stat.permissions.toMode() & 0o777 != 0o600) {
+    if (!file_permissions.isExactlyPrivateFile(stat.permissions)) {
         return error.PrivateStatePermissionsUnsupported;
     }
     const bytes = try io_mod.readFileToEnd(alloc, &file, max_store_bytes);

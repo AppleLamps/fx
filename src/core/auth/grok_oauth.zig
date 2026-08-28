@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const browser_callback = @import("browser_callback.zig");
 const grok_session = @import("grok_session.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
@@ -419,6 +420,10 @@ const StdinManualCodeReader = struct {
     closed: bool = false,
 
     fn poll(self: *StdinManualCodeReader) !?[]const u8 {
+        // `poll` is POSIX-only and `std.c.pollfd` does not exist for Windows,
+        // so the non-blocking stdin fallback is unavailable there. The browser
+        // callback remains the supported path until phase 3.
+        if (comptime builtin.os.tag == .windows) return null;
         if (self.closed) return null;
         var fds = [_]std.posix.pollfd{.{
             .fd = std.posix.STDIN_FILENO,

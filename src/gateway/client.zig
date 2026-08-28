@@ -5846,6 +5846,9 @@ const LoopbackGatewayFixture = struct {
         if (self.stopping.load(.seq_cst)) return;
         self.accepted.store(true, .seq_cst);
 
+        // This fault-injection server tunes sockets directly, which
+        // `std.posix.setsockopt` does not support on Windows.
+        if (comptime builtin.os.tag == .windows) return;
         switch (self.mode) {
             .reset_on_accept => {
                 const reset_on_close: std.posix.linger = .{

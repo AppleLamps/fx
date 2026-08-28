@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../shared/file_permissions.zig");
 const builtin = @import("builtin");
 const debug_trace = @import("../shared/debug_trace.zig");
 const command_contract = @import("command_contract.zig");
@@ -1526,6 +1527,7 @@ fn fallbackCommandArtifactDir(alloc: Allocator) ![]u8 {
 }
 
 fn currentProcessId() u64 {
+    if (comptime builtin.os.tag == .windows) return std.os.windows.GetCurrentProcessId();
     return @intCast(std.c.getpid());
 }
 
@@ -1701,7 +1703,7 @@ test "zsh user profile reports natural SIGTERM after alias-safe startup" {
         try wrapper.writeStreamingAll(io_mod.getIo(), source);
         try wrapper.setPermissions(
             io_mod.getIo(),
-            std.Io.File.Permissions.fromMode(0o700),
+            file_permissions.private_dir,
         );
     }
 
@@ -2591,6 +2593,9 @@ fn signalProcessGroup(pid: std.posix.pid_t, signal: std.posix.SIG) !void {
 }
 
 fn terminateRemainingProcessGroup(pid: std.posix.pid_t) void {
+    // Windows has no process groups or signals; Job Object termination
+    // replaces this in phase 2.
+    if (comptime builtin.os.tag == .windows) return;
     signalProcessGroup(pid, std.posix.SIG.KILL) catch |err| {
         debug_trace.logf(
             "core",
@@ -3186,7 +3191,7 @@ test "managed command artifact confirms an indeterminate rename target" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        file_permissions.private_dir,
     );
     const workspace = try io_mod.dirRealpathAlloc(
         alloc,
@@ -3266,7 +3271,7 @@ test "managed command artifact rejects an unconfirmed rename target" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        file_permissions.private_dir,
     );
     const workspace = try io_mod.dirRealpathAlloc(
         alloc,
@@ -3570,7 +3575,7 @@ test "cancellation preserves the termination grace in an invoked script" {
         );
         try script.setPermissions(
             io_mod.getIo(),
-            std.Io.File.Permissions.fromMode(0o700),
+            file_permissions.private_dir,
         );
     }
 
@@ -3646,7 +3651,7 @@ test "cancelled managed command confirms an indeterminate artifact target" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        file_permissions.private_dir,
     );
     const workspace = try io_mod.dirRealpathAlloc(
         alloc,

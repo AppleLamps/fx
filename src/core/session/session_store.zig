@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../shared/file_permissions.zig");
 const builtin = @import("builtin");
 const config_runtime = @import("../config/config_runtime.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
@@ -483,7 +484,7 @@ fn openUsageRecoveryProfileRoot(
     errdefer profile.close(zio);
     const stat = try profile.stat(zio);
     if (stat.kind != .directory or
-        stat.permissions.toMode() & 0o777 != 0o700)
+        !file_permissions.isExactlyPrivateDir(stat.permissions))
     {
         return error.InvalidUsageRecoveryIndex;
     }
@@ -506,7 +507,7 @@ fn openUsageRecoveryDir(
     errdefer dir.close(io_mod.getIo());
     const stat = try dir.stat(io_mod.getIo());
     if (stat.kind != .directory or
-        stat.permissions.toMode() & 0o777 != 0o700)
+        !file_permissions.isExactlyPrivateDir(stat.permissions))
     {
         return error.InvalidUsageRecoveryIndex;
     }
@@ -532,7 +533,7 @@ fn validateUsageRecoveryMarker(
         stat.nlink != 1 or
         stat.size == 0 or
         stat.size > max_usage_recovery_marker_bytes or
-        stat.permissions.toMode() & 0o777 != 0o600)
+        !file_permissions.isExactlyPrivateFile(stat.permissions))
     {
         return error.InvalidUsageRecoveryIndex;
     }
@@ -4778,14 +4779,14 @@ test "session snapshot locator resolver rejects symlink leaves and directories" 
         try tmp.dir.createDir(
             std.testing.io,
             sessions_name,
-            std.Io.File.Permissions.fromMode(0o700),
+            file_permissions.private_dir,
         );
         var sessions = try tmp.dir.openDir(std.testing.io, sessions_name, .{});
         defer sessions.close(std.testing.io);
         try sessions.createDir(
             std.testing.io,
             "session",
-            std.Io.File.Permissions.fromMode(0o700),
+            file_permissions.private_dir,
         );
         var session_dir = try sessions.openDir(std.testing.io, "session", .{});
         defer session_dir.close(std.testing.io);
@@ -4794,7 +4795,7 @@ test "session snapshot locator resolver rejects symlink leaves and directories" 
             try tmp.dir.createDir(
                 std.testing.io,
                 "outside-images",
-                std.Io.File.Permissions.fromMode(0o700),
+                file_permissions.private_dir,
             );
             var outside_images = try tmp.dir.openDir(std.testing.io, "outside-images", .{});
             defer outside_images.close(std.testing.io);
@@ -4826,7 +4827,7 @@ test "session snapshot locator resolver rejects symlink leaves and directories" 
             try session_dir.createDir(
                 std.testing.io,
                 "images",
-                std.Io.File.Permissions.fromMode(0o700),
+                file_permissions.private_dir,
             );
             var images_dir = try session_dir.openDir(std.testing.io, "images", .{});
             defer images_dir.close(std.testing.io);
@@ -4927,12 +4928,12 @@ fn loadedWriterBelongsToRoot(
 }
 
 fn prepareWritableSessionDir(dir: std.Io.Dir) !void {
-    const permissions = std.Io.File.Permissions.fromMode(0o700);
+    const permissions = file_permissions.private_dir;
     dir.setPermissions(io_mod.getIo(), permissions) catch
         return error.PrivateStatePermissionsUnsupported;
     const stat = try dir.stat(io_mod.getIo());
     if (stat.kind != .directory) return error.SessionPathUnsafe;
-    if (stat.permissions.toMode() & 0o777 != 0o700) {
+    if (!file_permissions.isExactlyPrivateDir(stat.permissions)) {
         return error.PrivateStatePermissionsUnsupported;
     }
 }
@@ -5123,7 +5124,7 @@ fn makeRawSessionsEntry(store: Store, name: []const u8) !void {
     sessions.dir.createDir(
         io_mod.getIo(),
         name,
-        std.Io.File.Permissions.fromMode(0o700),
+        file_permissions.private_dir,
     ) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
@@ -7739,7 +7740,7 @@ test "deferred token failure prevents a same-workspace canonical commit" {
         .read = true,
         .truncate = false,
         .exclusive = true,
-        .permissions = std.Io.File.Permissions.fromMode(0o600),
+        .permissions = file_permissions.private_file,
         .resolve_beneath = true,
     });
     obstacle.close(io_mod.getIo());
@@ -9066,12 +9067,12 @@ test "doctor ignores legacy task records" {
     defer session_dir.close(io_mod.getIo());
     try session_dir.setPermissions(
         io_mod.getIo(),
-        std.Io.File.Permissions.fromMode(0o700),
+        file_permissions.private_dir,
     );
     try session_dir.createDir(
         io_mod.getIo(),
         "tasks",
-        std.Io.File.Permissions.fromMode(0o700),
+        file_permissions.private_dir,
     );
     const corrupt_path = try std.fs.path.join(alloc, &.{
         session_path,
@@ -10204,7 +10205,7 @@ test "recovery verifies and copies persisted image snapshots into the new sessio
     try std.Io.Dir.createDirAbsolute(
         io_mod.getIo(),
         source_images,
-        std.Io.File.Permissions.fromMode(0o700),
+        file_permissions.private_dir,
     );
     const image_bytes = "\x89PNG\r\n\x1a\nrecovery-image";
     var digest_bytes: [32]u8 = undefined;
@@ -10227,7 +10228,7 @@ test "recovery verifies and copies persisted image snapshots into the new sessio
         .{
             .truncate = false,
             .exclusive = true,
-            .permissions = std.Io.File.Permissions.fromMode(0o600),
+            .permissions = file_permissions.private_file,
         },
     );
     try image_file.writeStreamingAll(io_mod.getIo(), image_bytes);
@@ -11823,7 +11824,7 @@ test "summary index marker preparation rejects an uncommitted session" {
     try sessions.dir.createDir(
         io_mod.getIo(),
         "index.pending",
-        std.Io.File.Permissions.fromMode(0o700),
+        file_permissions.private_dir,
     );
 
     var state = try testDurableState(alloc, "marker-prepare-failure", ctx.workspace);

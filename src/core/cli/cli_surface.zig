@@ -1854,6 +1854,10 @@ fn runPasteSetup(
 }
 
 fn setupTerminalAvailableDefault(_: ?*anyopaque) bool {
+    // Hiding the key as it is typed needs SetConsoleMode on Windows, which
+    // lands with the auth work in phase 3. Reporting no interactive terminal
+    // makes `fx setup` decline rather than echo a pasted key.
+    if (comptime builtin.os.tag == .windows) return false;
     return std.c.isatty(std.posix.STDIN_FILENO) != 0 and
         std.c.isatty(std.posix.STDERR_FILENO) != 0;
 }
@@ -1864,6 +1868,8 @@ fn readMaskedKeyDefault(
     write_mask: WriteFn,
     write_ctx: ?*anyopaque,
 ) ![]u8 {
+    // Unreachable on Windows: `setupTerminalAvailableDefault` declines first.
+    if (comptime builtin.os.tag == .windows) return error.NotATerminal;
     var raw = try MaskedKeyRawMode.enable();
     defer raw.disable();
 

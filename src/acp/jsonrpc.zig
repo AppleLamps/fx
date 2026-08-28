@@ -1,4 +1,6 @@
 const std = @import("std");
+const builtin = @import("builtin");
+const stdio = @import("../core/shared/stdio.zig");
 const io_mod = @import("../core/shared/io.zig");
 const host_target = @import("../core/hosts/target.zig");
 
@@ -303,13 +305,15 @@ pub const Reader = struct {
     // child processes. WASI has no std.posix surface, so use the injected std.Io
     // backend and let the host's fd_read import suspend through JSPI.
     fn readStdin(_: ?*anyopaque, destination: []u8) usize {
-        if (comptime host_target.is_wasm) {
+        // Windows has no integer stdin descriptor, so it takes the same
+        // portable path as wasm rather than `std.posix.read`.
+        if (comptime host_target.is_wasm or builtin.os.tag == .windows) {
             return std.Io.File.stdin().readStreaming(
                 io_mod.getIo(),
                 &.{destination},
             ) catch return 0;
         }
-        return std.posix.read(std.posix.STDIN_FILENO, destination) catch return 0;
+        return std.posix.read(stdio.default_stdin, destination) catch return 0;
     }
 
     fn readFromSource(self: *Reader) usize {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../shared/file_permissions.zig");
 const builtin = @import("builtin");
 const contracts = @import("contracts.zig");
 const protocol = @import("protocol.zig");
@@ -29,7 +30,7 @@ const listener_poll_ms = 50;
 const transport_hash_bytes: usize = 16;
 const transport_hash_context = "fx.terminal.transport.v1\x00";
 const socket_permissions: std.Io.File.Permissions = switch (builtin.os.tag) {
-    .macos, .linux => .fromMode(0o600),
+    .macos, .linux => file_permissions.private_file,
     else => .default_file,
 };
 
@@ -88,6 +89,14 @@ const EndpointSelection = struct {
         self.* = undefined;
     }
 };
+
+/// The terminal host is a POSIX-only backend. Windows has no uid, and this
+/// value only ever reaches the unsupported path, so it is fixed there rather
+/// than calling `getuid`, which does not exist on Windows.
+fn currentUid() std.c.uid_t {
+    if (comptime builtin.os.tag == .windows) return 0;
+    return std.c.getuid();
+}
 
 fn resolveEndpointSelection(
     alloc: Allocator,
@@ -203,7 +212,7 @@ pub const Paths = struct {
             alloc,
             builtin.os.tag,
             home,
-            std.c.getuid(),
+            currentUid(),
         );
         var selection_owned = true;
         errdefer if (selection_owned) selection.deinit(alloc);
@@ -229,7 +238,7 @@ pub const Paths = struct {
         if (selection.uses_fallback) {
             transport_dir = try openRuntimeTransportDir(
                 selection.transport_root,
-                std.c.getuid(),
+                currentUid(),
             );
         }
         selection_owned = false;
@@ -290,7 +299,7 @@ fn openVerifiedPrivateRuntimeDir(
             parent.createDir(
                 zio,
                 name,
-                std.Io.File.Permissions.fromMode(0o700),
+                file_permissions.private_dir,
             ) catch |create_err| switch (create_err) {
                 error.PathAlreadyExists => {},
                 else => return create_err,
@@ -362,7 +371,7 @@ fn validatePrivateRuntimeDir(
 ) !void {
     if (stat.kind != .directory) return error.RuntimeDirectoryUnsafe;
     if (owner_uid != uid) return error.RuntimeDirectoryOwnerMismatch;
-    if (stat.permissions.toMode() & 0o777 != 0o700) {
+    if (!file_permissions.isExactlyPrivateDir(stat.permissions)) {
         return error.PrivateStatePermissionsUnsupported;
     }
 }
@@ -1429,7 +1438,7 @@ fn verifyEndpointPermissions(host_dir: *io_mod.VerifiedDir) !void {
         .{ .follow_symlinks = false },
     );
     if (stat.kind != .unix_domain_socket or
-        stat.permissions.toMode() & 0o777 != 0o600)
+        !file_permissions.isExactlyPrivateFile(stat.permissions))
     {
         return error.PrivateEndpointPermissionsUnsupported;
     }

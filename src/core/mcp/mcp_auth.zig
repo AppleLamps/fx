@@ -1868,8 +1868,11 @@ fn validateJsonContentType(content_type: ?[]const u8) !void {
 }
 
 fn setSocketTimeouts(socket: std.posix.socket_t, seconds: i64) void {
-    if (comptime host_target.is_wasm) return;
-    const timeout = std.posix.timeval{ .sec = seconds, .usec = 0 };
+    // `std.posix.setsockopt` refuses to compile for Windows in Zig 0.16.0
+    // ("use std.Io instead"). Requests still work; they just fall back to the
+    // client's own timeout handling.
+    if (comptime host_target.is_wasm or builtin.os.tag == .windows) return;
+    const timeout = std.posix.timeval{ .sec = @intCast(seconds), .usec = 0 };
     const bytes = std.mem.asBytes(&timeout);
     std.posix.setsockopt(
         socket,

@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../shared/file_permissions.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
 const io_mod = @import("../shared/io.zig");
 const profile_paths = @import("../shared/profile_paths.zig");
@@ -356,17 +357,16 @@ pub const Store = struct {
         errdefer durable_home.close(zio);
 
         if (mode == .writable) {
-            durable_home.setPermissions(zio, std.Io.File.Permissions.fromMode(0o700)) catch {
+            durable_home.setPermissions(zio, file_permissions.private_dir) catch {
                 return error.PrivateStatePermissionsUnsupported;
             };
         }
         const stat = try durable_home.stat(zio);
         if (stat.kind != .directory) return error.DurablePathUnsafe;
-        const durable_mode = stat.permissions.toMode() & 0o777;
-        if (mode == .writable and durable_mode != 0o700) {
+        if (mode == .writable and !file_permissions.isExactlyPrivateDir(stat.permissions)) {
             return error.PrivateStatePermissionsUnsupported;
         }
-        if (mode == .read_only and durableModeWritableByGroupOrOther(durable_mode)) {
+        if (mode == .read_only and !file_permissions.isProtectedFromGroupAndOther(stat.permissions)) {
             return error.PrivateStatePermissionsUnsupported;
         }
 
@@ -720,16 +720,15 @@ pub const Store = struct {
         const stat = try file.stat(zio);
         try io_mod.verifyOpenedRegularFile(stat, open_mode);
         if (self.mode == .writable) {
-            file.setPermissions(zio, std.Io.File.Permissions.fromMode(0o600)) catch {
+            file.setPermissions(zio, file_permissions.private_file) catch {
                 return error.PrivateStatePermissionsUnsupported;
             };
         }
         const verified_stat = if (self.mode == .writable) try file.stat(zio) else stat;
-        const primary_mode = verified_stat.permissions.toMode() & 0o777;
-        if (self.mode == .writable and primary_mode != 0o600) {
+        if (self.mode == .writable and !file_permissions.isExactlyPrivateFile(verified_stat.permissions)) {
             return error.PrivateStatePermissionsUnsupported;
         }
-        if (self.mode == .read_only and durableModeWritableByGroupOrOther(primary_mode)) {
+        if (self.mode == .read_only and !file_permissions.isProtectedFromGroupAndOther(verified_stat.permissions)) {
             return error.PrivateStatePermissionsUnsupported;
         }
         if (verified_stat.size > max_settings_bytes) return .oversized;
@@ -746,10 +745,6 @@ pub const Store = struct {
         self.createSequencedCopy(alloc, "corrupt", bytes, corrupt_keep_count) catch |err| {
             debug_trace.logf("config", "settings corrupt copy skipped err={s}", .{@errorName(err)});
         };
-    }
-
-    fn durableModeWritableByGroupOrOther(mode: std.posix.mode_t) bool {
-        return mode & 0o022 != 0;
     }
 
     fn createSequencedCopy(

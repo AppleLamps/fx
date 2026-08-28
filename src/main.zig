@@ -3151,10 +3151,21 @@ fn rawArgs(c_argc: c_int, c_argv: [*][*:0]c_char) []const [*:0]const u8 {
 }
 
 fn argsFromRaw(raw_args: []const [*:0]const u8) std.process.Args {
+    // Windows has no C argument vector: `Args.Vector` there is the WTF-16
+    // command line, which lives in the process environment block.
+    if (comptime builtin.os.tag == .windows) {
+        return .{ .vector = std.os.windows.peb().ProcessParameters.CommandLine.slice() };
+    }
     return .{ .vector = raw_args };
 }
 
 fn environBlockFromRaw(raw_env: RawEnviron) std.process.Environ.Block {
+    // Windows stores the environment in the PEB, which moves when the
+    // environment is modified, so `Environ.Block` there is a marker that
+    // defers to the global block rather than a borrowed slice.
+    if (comptime builtin.os.tag == .windows) {
+        return .global;
+    }
     var count: usize = 0;
     while (raw_env[count] != null) : (count += 1) {}
     return .{ .slice = raw_env[0..count :null] };
@@ -4056,6 +4067,7 @@ test {
     _ = @import("core/images/image_attachments.zig");
     _ = @import("core/images/image_commands.zig");
     _ = @import("core/shared/io.zig");
+    _ = @import("core/shared/file_permissions.zig");
     _ = @import("core/shared/message.zig");
     _ = @import("core/shared/token_estimate.zig");
     _ = @import("core/shell_command/command_effect.zig");
