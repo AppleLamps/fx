@@ -903,6 +903,16 @@ pub fn makeDirRecursive(path: []const u8) !void {
 }
 
 pub fn realpathAlloc(alloc: std.mem.Allocator, path: []const u8) ![]u8 {
+    if (comptime builtin.os.tag == .windows) {
+        // Windows has no `realpath`. Opening the path and asking for its
+        // final name resolves symlinks and junctions the same way, which is
+        // what the containment checks built on this function rely on.
+        var file = std.Io.Dir.cwd().openFile(getIo(), path, .{
+            .allow_directory = true,
+        }) catch return error.FileNotFound;
+        defer file.close(getIo());
+        return windowsHandlePathAlloc(alloc, file.handle);
+    }
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const path_z = try std.fmt.bufPrintZ(&buf, "{s}", .{path});
     var result_buf: [std.fs.max_path_bytes]u8 = undefined;

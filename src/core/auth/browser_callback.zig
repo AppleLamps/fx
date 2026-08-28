@@ -347,6 +347,10 @@ fn writePreflightResponse(stream: std.Io.net.Stream, origin: []const u8) !void {
 }
 
 fn setSocketTimeouts(socket: std.posix.socket_t) void {
+    // `std.c.setsockopt` resolves to the libc symbol, which does not exist on
+    // Windows: sockets there live in ws2_32. Browser-callback sign-in is
+    // phase 3 work, so the timeouts are simply not applied.
+    if (comptime builtin.os.tag == .windows) return;
     const timeout = std.posix.timeval{ .sec = socket_timeout_seconds, .usec = 0 };
     const receive_rc = std.c.setsockopt(
         socket,
@@ -422,6 +426,9 @@ const ResetPreconnectProbe = struct {
     failed: std.atomic.Value(bool) = .init(false),
 
     fn run(self: *ResetPreconnectProbe) void {
+        // This test probe forces a TCP reset via SO_LINGER, which
+        // `std.posix.setsockopt` cannot do on Windows.
+        if (comptime builtin.os.tag == .windows) return self.finish(true);
         const io = io_mod.getIo();
         var address = std.Io.net.IpAddress.parse("127.0.0.1", self.port) catch
             return self.finish(true);

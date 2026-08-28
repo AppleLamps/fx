@@ -184,6 +184,8 @@ pub const Client = struct {
 };
 
 fn applyResponseTimeout(stream: std.Io.net.Stream) void {
+    // `std.posix.setsockopt` has no Windows implementation in Zig 0.16.0.
+    if (comptime builtin.os.tag == .windows) return;
     std.posix.setsockopt(
         stream.socket.handle,
         std.posix.SOL.SOCKET,

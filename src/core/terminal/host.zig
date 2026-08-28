@@ -90,6 +90,14 @@ const EndpointSelection = struct {
     }
 };
 
+/// The terminal host is a POSIX-only backend. Windows has no uid, and this
+/// value only ever reaches the unsupported path, so it is fixed there rather
+/// than calling `getuid`, which does not exist on Windows.
+fn currentUid() std.c.uid_t {
+    if (comptime builtin.os.tag == .windows) return 0;
+    return std.c.getuid();
+}
+
 fn resolveEndpointSelection(
     alloc: Allocator,
     target: std.Target.Os.Tag,
@@ -204,7 +212,7 @@ pub const Paths = struct {
             alloc,
             builtin.os.tag,
             home,
-            std.c.getuid(),
+            currentUid(),
         );
         var selection_owned = true;
         errdefer if (selection_owned) selection.deinit(alloc);
@@ -230,7 +238,7 @@ pub const Paths = struct {
         if (selection.uses_fallback) {
             transport_dir = try openRuntimeTransportDir(
                 selection.transport_root,
-                std.c.getuid(),
+                currentUid(),
             );
         }
         selection_owned = false;

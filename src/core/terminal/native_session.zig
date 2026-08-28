@@ -3200,6 +3200,9 @@ fn httpReady(alloc: Allocator, url: []const u8) bool {
 }
 
 fn applyMonitorSocketTimeout(stream: std.Io.net.Stream, timeout_ms: i64) void {
+    // `std.posix.setsockopt` has no Windows implementation in Zig 0.16.0.
+    // The terminal host itself is a phase 4 backend.
+    if (comptime builtin.os.tag == .windows) return;
     const timeout = std.posix.timeval{
         .sec = @intCast(@divTrunc(timeout_ms, 1000)),
         .usec = @intCast(@mod(timeout_ms, 1000) * 1000),
