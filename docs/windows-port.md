@@ -1,9 +1,21 @@
 # Windows platform port — scope, sequencing, and phase plan
 
-Status: phases 0 through 3 are implemented; see the phase reports linked
-below. Phases 2 and 3 are not verified end to end. This document remains the
-plan of record for the scope and sequencing; the code lives in the tree.
+Status: phases 0 through 3 are implemented, and phase 4's foundation is; see
+the phase reports linked below. Phases 2, 3, and 4 are not verified end to end.
+This document remains the plan of record for the scope and sequencing; the code
+lives in the tree.
 
+> **Phase 4 landed its foundation only.** `windows_pty.zig` binds ConPTY —
+> absent from Zig's std entirely — and spawns a child attached to a
+> pseudoconsole through `STARTUPINFOEX`, which `std.process.spawn` cannot do.
+> The session backend on top of it is not written, and
+> `terminalSupportForOs(.windows)` is still `.unsupported`. Under wine the
+> pseudoconsole is created and the child spawns, but no bytes flow through the
+> pty and resize fails, so the data path is unexercisable here. See
+> [`windows-port-phase4.md`](windows-port-phase4.md). It does close phase 2's
+> spawn-to-assignment race for pseudoconsole children, and flips the `url_open`
+> capability phase 3 earned but left false.
+>
 > **Phase 3 has landed for credential storage only.** `fx.exe` reads a stored
 > API key on Windows — the first file this program has ever read there. OAuth
 > browser sign-in did not land, and the blocker is below fx: Zig 0.16 drives
@@ -288,6 +300,15 @@ A second backend against `contracts.zig`. This is where
 `terminalSupportForOs(.windows)` finally becomes `.supported`.
 
 Exit: interactive sessions, resize, and recovery.
+
+**Partly delivered; exit not met.** The pseudoconsole layer is implemented and
+its setup path is exercised, but the session backend is not written and the
+flag is not flipped. Two things this plan did not anticipate: ConPTY is absent
+from Zig's std, and `std.process.spawn` cannot attach a pseudoconsole, so the
+backend must own its own `CreateProcessW`. Wine creates a pseudoconsole but
+does not wire console I/O to it, so pty data flow — the backend's central
+behavior — cannot be run anywhere in this environment. See
+[`windows-port-phase4.md`](windows-port-phase4.md).
 
 ### Phase 5 — CI and release
 
