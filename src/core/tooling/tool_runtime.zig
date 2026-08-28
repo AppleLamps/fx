@@ -7467,7 +7467,7 @@ test "memory tool uses isolated HOME and preserves outputs" {
     var no_home_rt = TestRuntime{};
     defer no_home_rt.deinit(alloc);
     try setTestHome(null);
-    try expectToolOutput(no_home_rt.context(), "memory", "{\"action\":\"list\"}", "memory unavailable: HOME not set");
+    try expectToolOutput(no_home_rt.context(), "memory", "{\"action\":\"list\"}", "memory unavailable: no home directory (HOME, or USERPROFILE on Windows)");
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

@@ -107,6 +107,15 @@ counterpart needs no seam — `std.Io.File.setPermissions` is implemented on
 Windows, and `private_file` is `.default_file`, which is zero, the value
 `NtSetInformationFile` reads as "leave the attributes alone."
 
+The first sweep of this seam missed most of its call sites, because the audit
+grep was truncated with `head -20` and acted on as if complete. A reviewer
+caught `session_log.zig`, which every saved CLI and ACP session goes through —
+so the fix for one abort would have shipped alongside a worse one. The audit is
+now scripted and classifies every site by receiver type and by whether it sits
+in a test, which is reproducible in a way reading twenty lines of grep is not.
+All 11 production `Dir.setPermissions` calls are on the seam. The remaining
+production calls all have `File` receivers, which need no seam.
+
 ## Finding 6 — a no-follow open returns a handle `std.Io` cannot read
 
 This is the significant one, it is not confined to auth, and it was also found
@@ -261,6 +270,10 @@ rename, `statFile` with `nlink`, and — after finding 6 — reads.
   cannot arbitrate. It belongs on phase 5's `windows-latest` runner.
 - **Directory-sync durability has a documented gap.** `ReOpenFile` with write
   access might reach the real barrier; it needs a Windows host to judge.
-- **Three test-only `Dir.setPermissions` call sites remain unswept**
-  (`settings_store.zig`, `session_store.zig`). They will panic if the suite is
-  ever run on Windows, which is phase 5's job.
+- **Eight test-only `Dir.setPermissions` call sites remain unswept**
+  (`settings_store.zig` x2, `profile_usage_store.zig` x4, `session_store.zig`
+  x2). They will panic if the suite is ever run on Windows, which is phase 5's
+  job. They are deliberately not routed through the seam: each one exists to
+  establish a permission state the test then asserts against, and a silent
+  no-op would leave the test asserting nothing. The right Windows behavior for
+  them is `error.SkipZigTest`, which the seam cannot express.

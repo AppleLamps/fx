@@ -252,7 +252,7 @@ fn ensureManagedDir(parent_path: []const u8, child_name: []const u8) !void {
             else => return err,
         };
         defer child.close(zio);
-        child.setPermissions(zio, file_permissions.private_dir) catch
+        file_permissions.setDirPermissions(child, zio, file_permissions.private_dir) catch
             return error.CorruptArtifactStore;
         const stat = try child.stat(zio);
         if (stat.kind != .directory or !file_permissions.isExactlyPrivateDir(stat.permissions)) {

@@ -30,6 +30,12 @@
 //! `processSpawn`: one seam covers every caller, including the ones a sweep
 //! would miss.
 //!
+//! It covers every caller that reaches I/O through `io_mod.getIo()`, which
+//! installs the wrapper — including under test, where `getIo` returns a
+//! wrapped `std.testing.io`. A no-follow open handed `std.testing.io`
+//! *directly* bypasses it and will abort on Windows. Two test helpers did;
+//! both now use `getIo()`, and new code should for the same reason.
+//!
 //! Verified under wine across every combination of `openFile` options this
 //! codebase uses: `follow_symlinks = false` is the only one that reproduces
 //! the abort, and correcting the flag makes all of them read. Whether real
@@ -68,7 +74,10 @@ fn dirOpenFile(
 ) std.Io.File.OpenError!std.Io.File {
     const original = wrapped_original_vtable.?;
     var file = try original.dirOpenFile(userdata, dir, sub_path, options);
-    file.flags.nonblocking = needsNonblocking(options);
+    // Only ever set the flag, never clear it. std has one reason to hand back
+    // an asynchronous handle today; if it gains another, clearing the flag
+    // here would recreate exactly the bug this corrects.
+    if (needsNonblocking(options)) file.flags.nonblocking = true;
     return file;
 }
 

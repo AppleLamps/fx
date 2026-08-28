@@ -380,7 +380,7 @@ const CapabilityImpl = struct {
         errdefer dir.close(io_mod.getIo());
 
         if (self.mode == .writable) {
-            dir.setPermissions(io_mod.getIo(), private_dir_permissions) catch
+            file_permissions.setDirPermissions(dir, io_mod.getIo(), private_dir_permissions) catch
                 return error.PrivateStatePermissionsUnsupported;
         }
         try verifyPrivateDirectory(dir);
@@ -536,7 +536,7 @@ pub const SessionChildCapability = struct {
         };
         errdefer route.close(io_mod.getIo());
         if (mode == .writable) {
-            route.setPermissions(io_mod.getIo(), private_dir_permissions) catch
+            file_permissions.setDirPermissions(route, io_mod.getIo(), private_dir_permissions) catch
                 return error.PrivateStatePermissionsUnsupported;
         }
         try verifyPrivateDirectory(route);
@@ -593,7 +593,8 @@ pub const SessionChildCapability = struct {
         };
         errdefer records.close(io_mod.getIo());
         if (mode == .writable) {
-            records.setPermissions(
+            file_permissions.setDirPermissions(
+                records,
                 io_mod.getIo(),
                 private_dir_permissions,
             ) catch return error.PrivateStatePermissionsUnsupported;
@@ -627,7 +628,8 @@ pub const SessionChildCapability = struct {
         errdefer if (logs) |route| route.close(io_mod.getIo());
         if (logs) |route| {
             if (mode == .writable) {
-                route.setPermissions(
+                file_permissions.setDirPermissions(
+                    route,
                     io_mod.getIo(),
                     private_dir_permissions,
                 ) catch return error.PrivateStatePermissionsUnsupported;
