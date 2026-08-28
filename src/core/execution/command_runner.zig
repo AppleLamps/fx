@@ -1063,6 +1063,7 @@ fn executeProcessWithInput(
         null,
         process_group_id,
         .process_group,
+        null,
     );
     const duration_ms = elapsedMs(started_ms, io_mod.milliTimestamp());
 
@@ -1199,6 +1200,7 @@ fn executeProcessWithDetachedSession(
         &launch_failure_probe,
         process_group_id,
         .foreground_supervisor,
+        null,
     );
     collected.source = reconcileForegroundTerminationSource(
         collected.source,
@@ -1379,6 +1381,7 @@ fn executeProcessWithScriptUnisolated(
         null,
         process_group_id,
         .process_group,
+        job,
     );
     const duration_ms = elapsedMs(started_ms, io_mod.milliTimestamp());
 
@@ -2176,6 +2179,9 @@ const ProcessObserver = struct {
     stdout: std.Io.File,
     stderr: std.Io.File,
     detached_pipes: bool = false,
+    /// Windows process-tree handle. Termination must reach the whole tree, not
+    /// just the leader; see `signal`.
+    job: ?windows_job.Job = null,
 
     fn init(child: *std.process.Child) !ProcessObserver {
         const process_id = child.id orelse return error.SpawnFailed;
@@ -2275,6 +2281,12 @@ const ProcessObserver = struct {
     ) !void {
         if (builtin.os.tag == .windows or builtin.os.tag == .wasi) {
             self.waiter.child.kill(self.waiter.io);
+            // Killing the leader is not enough. A descendant that inherited
+            // stdout or stderr keeps those pipe handles open, and output
+            // collection cannot reach EOF until every copy closes — so a
+            // timeout would block forever instead of being enforced.
+            // Terminating the job closes them by taking the tree down.
+            self.terminateJob();
             return;
         }
         const target_pid = process_group_id orelse self.process_id;
@@ -2285,9 +2297,26 @@ const ProcessObserver = struct {
         };
     }
 
+    /// Takes down the whole Windows process tree. A no-op elsewhere, and
+    /// tolerant of a job that is already gone: this runs on paths that are
+    /// already handling a failure.
+    fn terminateJob(self: *ProcessObserver) void {
+        if (comptime !windows_job.supported) return;
+        const owned = self.job orelse return;
+        owned.terminate(1) catch |err| {
+            debug_trace.logf(
+                "core",
+                "job termination failed err={s}",
+                .{@errorName(err)},
+            );
+        };
+    }
+
     fn abort(self: *ProcessObserver, process_group_id: ?std.posix.pid_t) void {
         if (builtin.os.tag == .windows or builtin.os.tag == .wasi) {
             cleanupChild(self.waiter.child);
+            // Same reasoning as `signal`: descendants hold the pipes.
+            self.terminateJob();
             return;
         }
         if (self.waiter.isReady()) {
@@ -2478,11 +2507,13 @@ fn collectSpawnedProcess(
     launch_failure_probe: ?*ForegroundLaunchFailureProbe,
     process_group_id: ?std.posix.pid_t,
     termination_protocol: TerminationProtocol,
+    job: ?windows_job.Job,
 ) !CollectedTermination {
     var observer = ProcessObserver.init(child) catch |err| {
         cleanupChild(child);
         return err;
     };
+    observer.job = job;
     defer observer.deinit();
     observer.start() catch |err| {
         debug_trace.logf(

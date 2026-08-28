@@ -4,9 +4,17 @@ Companion to [`windows-port.md`](windows-port.md),
 [`windows-port-phase0.md`](windows-port-phase0.md), and
 [`windows-port-phase1.md`](windows-port-phase1.md).
 
-Phase 2 covers execution and process semantics. Most of it is delivered; the
-part that cannot be proven without a Windows host is named as such below, and
-the `background_processes` capability stays off because of it.
+Phase 2 covers execution and process semantics. The implementation is
+delivered; **the phase is not done**.
+
+`AGENTS.md` requires running the binary and exercising the change on its happy
+path before calling work ready, and explicitly requires saying so and asking
+for verification when that is not possible here. It is not possible here: the
+changed happy path is a command executing through PowerShell inside a Job
+Object, and this environment has neither a real PowerShell nor a way to
+arbitrate Job Object semantics. **Someone needs to run a command through
+`fx` on a real Windows host before this phase can be called complete.** The
+`background_processes` capability stays off until then.
 
 ## The "never executed" gap is closed
 
@@ -122,6 +130,27 @@ The lesson is procedural: compare failing **sets** against a baseline run in
 the same environment at the same time. A count carried over from an earlier
 run is not a baseline, and quoting one invites chasing a regression that does
 not exist.
+
+## A deadlock the review caught
+
+The first cut closed the Job Object with a `defer` at the end of
+`executeProcessWithScriptUnisolated`. That is too late, and would have hung.
+
+A descendant that inherits stdout or stderr keeps those pipe handles open.
+Output collection cannot return until every copy closes. On Windows, timeout
+and cancellation reach only the leader through `child.kill()`, so the
+descendant survives holding the pipes, collection never sees EOF, and the
+`defer` that would have killed the tree cannot run because it is waiting on the
+collection that is waiting on the descendant. A timeout would hang forever
+instead of being enforced — the opposite of the phase's purpose.
+
+The job is now carried on `ProcessObserver` and terminated inside `signal` and
+`abort`, so the tree comes down *before* anything waits for EOF. The POSIX path
+never had this problem: killing the process group closes the pipes as a side
+effect.
+
+This is worth recording because it is a general shape, not a one-off: on
+Windows, killing a process does not close the handles its children hold.
 
 ## What is not done
 
