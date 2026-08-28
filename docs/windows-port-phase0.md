@@ -29,7 +29,7 @@ zig build -Doptimize=ReleaseSafe          → exit 0, 12 MB ELF x86-64 binary
 ./zig-out/bin/fx status --json            → exit 0, stdout non-empty, stderr empty
 ```
 
-That is exactly the smoke test `full-ci.yml:59-75` runs on every native job,
+That is exactly the smoke test `.github/workflows/full-ci.yml:59-75` runs on every native job,
 and it passes. Same toolchain, same tree, same optimize level: Linux produces a
 working binary, Windows fails during semantic analysis. **The 30 errors are
 platform-specific, not a toolchain mismatch.**

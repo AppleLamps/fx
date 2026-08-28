@@ -251,26 +251,26 @@ Exit: interactive sessions, resize, and recovery.
 
 ### Phase 5 — CI and release
 
-Add `x86_64-windows` to the cross-compile matrix in `release.yml`. Zig
+Add `x86_64-windows` to the cross-compile matrix in `.github/workflows/release.yml`. Zig
 cross-compiles, so *building* is cheap — but packaging is not a matrix entry
 away. The package step hard-codes the POSIX artifact
-(`cp zig-out/bin/fx …` then `tar -czf`, `release.yml:68-74`), and a Windows
+(`cp zig-out/bin/fx …` then `tar -czf`, `.github/workflows/release.yml:68-74`), and a Windows
 target emits `zig-out/bin/fx.exe`. Following this phase literally fails at
 packaging and never uploads a Windows artifact. Windows needs its own binary
 name, archive format (`.zip`, not `.tar.gz`), and checksum wiring into the
 release job.
 
-Add a `windows-latest` runner to `full-ci.yml`. It must **build and smoke-test
+Add a `windows-latest` runner to `.github/workflows/full-ci.yml`. It must **build and smoke-test
 the binary**, not just run `zig build test`: the existing native jobs run
 `fx help` and `fx status --json` and assert non-empty stdout with empty stderr
-(`full-ci.yml:59-75`). Unit tests alone never launch the product, so Windows
+(`.github/workflows/full-ci.yml:59-75`). Unit tests alone never launch the product, so Windows
 startup, console initialization, and stray-stderr regressions would all pass
 the gate. The Windows job should exercise the same noninteractive happy path
 against the freshly built `fx.exe`.
 
 **The E2E suite cannot run on Windows as written.** It is Bun + tmux with
-`FX_REQUIRE_TMUX: "1"` (`full-ci.yml:113`), and the shard runner resets a tmux
-server between files (`full-ci.yml:213-216`). A Windows E2E harness is its own
+`FX_REQUIRE_TMUX: "1"` (`.github/workflows/full-ci.yml:113`), and the shard runner resets a tmux
+server between files (`.github/workflows/full-ci.yml:213-216`). A Windows E2E harness is its own
 project and should not gate v1.
 
 ---
