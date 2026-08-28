@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../shared/file_permissions.zig");
 const builtin = @import("builtin");
 const debug_trace = @import("../shared/debug_trace.zig");
 const host_target = @import("../hosts/target.zig");
@@ -126,7 +127,7 @@ fn signalE2ELockContention(fx_dir: std.Io.Dir) void {
     if (!std.mem.eql(u8, enabled, "1")) return;
     var file = fx_dir.createFile(io_mod.getIo(), e2e_lock_contention_file_name, .{
         .truncate = true,
-        .permissions = std.Io.File.Permissions.fromMode(0o600),
+        .permissions = file_permissions.private_file,
     }) catch return;
     defer file.close(io_mod.getIo());
     file.writeStreamingAll(io_mod.getIo(), "contended\n") catch {};
@@ -267,7 +268,7 @@ fn observeAuthFile(alloc: Allocator, fx_dir: *std.Io.Dir) !FileObservation {
         debug_trace.logf("auth", "session load failed source=file step=stat err={s}", .{@errorName(err)});
         return .unusable;
     };
-    if (stat.kind != .file or stat.nlink != 1 or stat.permissions.toMode() & 0o077 != 0) {
+    if (stat.kind != .file or stat.nlink != 1 or !file_permissions.isPrivateToOwner(stat.permissions)) {
         debug_trace.logf("auth", "session load failed source=file step=permissions err=InsecureAuthFile", .{});
         return .unusable;
     }
@@ -632,7 +633,7 @@ fn loadFromDir(alloc: Allocator, fx_dir: *std.Io.Dir, mode: LoadMode) !?Session 
     defer file.close(io_mod.getIo());
 
     const stat = try file.stat(io_mod.getIo());
-    if (stat.kind != .file or stat.permissions.toMode() & 0o077 != 0) {
+    if (stat.kind != .file or !file_permissions.isPrivateToOwner(stat.permissions)) {
         debug_trace.logf("auth", "session load failed step=permissions err=InsecureAuthFile", .{});
         return null;
     }
@@ -770,15 +771,15 @@ fn openExistingPrivateFxDir(home_dir: *io_mod.VerifiedDir) !io_mod.VerifiedDir {
 
     const initial_stat = try dir.stat(io_mod.getIo());
     if (initial_stat.kind != .directory) return error.DurablePathUnsafe;
-    if (initial_stat.permissions.toMode() & 0o200 == 0) {
+    if (!file_permissions.isOwnerWritable(initial_stat.permissions)) {
         return error.PrivateStatePermissionsUnsupported;
     }
-    dir.setPermissions(io_mod.getIo(), std.Io.File.Permissions.fromMode(0o700)) catch {
+    dir.setPermissions(io_mod.getIo(), file_permissions.private_dir) catch {
         return error.PrivateStatePermissionsUnsupported;
     };
     const stat = try dir.stat(io_mod.getIo());
     if (stat.kind != .directory) return error.DurablePathUnsafe;
-    if (stat.permissions.toMode() & 0o777 != 0o700) {
+    if (!file_permissions.isExactlyPrivateDir(stat.permissions)) {
         return error.PrivateStatePermissionsUnsupported;
     }
     return .{ .dir = dir };
@@ -1072,7 +1073,7 @@ const FakeOAuthKeychain = struct {
 fn writeTestAuthFile(dir: std.Io.Dir, contents: []const u8) !void {
     var file = try dir.createFile(std.testing.io, auth_file_name, .{
         .truncate = true,
-        .permissions = std.Io.File.Permissions.fromMode(0o600),
+        .permissions = file_permissions.private_file,
     });
     defer file.close(std.testing.io);
     try file.writeStreamingAll(std.testing.io, contents);
@@ -1283,7 +1284,7 @@ test "oauth session loading propagates allocation failures" {
     defer tmp.cleanup();
 
     var file = try tmp.dir.createFile(std.testing.io, auth_file_name, .{
-        .permissions = std.Io.File.Permissions.fromMode(0o600),
+        .permissions = file_permissions.private_file,
     });
     try file.writeStreamingAll(
         std.testing.io,

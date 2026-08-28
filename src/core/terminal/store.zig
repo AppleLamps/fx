@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../shared/file_permissions.zig");
 const contracts = @import("contracts.zig");
 const monitor_core = @import("monitor.zig");
 const operation = @import("operation.zig");
@@ -460,7 +461,9 @@ pub const Record = struct {
             return error.InvalidTerminalRecord;
         }
         if (self.takeover_owner_pid) |pid| {
-            _ = std.fmt.parseInt(std.posix.pid_t, pid, 10) catch
+            // `std.posix.pid_t` is a HANDLE on Windows and cannot be parsed
+            // from text; this only validates that the field is numeric.
+            _ = std.fmt.parseInt(u64, pid, 10) catch
                 return error.InvalidTerminalRecord;
             _ = process_supervisor.ProcessInstanceToken.parse(
                 self.takeover_owner_process_token.?,
@@ -8119,7 +8122,7 @@ test "tmux recovery propagates proof capability failure without durable loss" {
     defer proof_file.close(std.testing.io);
     try proof_file.setPermissions(
         std.testing.io,
-        std.Io.File.Permissions.fromMode(0o600),
+        file_permissions.private_file,
     );
 
     {

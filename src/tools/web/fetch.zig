@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const diagnostics = @import("../../core/workspace/diagnostics.zig");
 const fetch_args = @import("fetch_args.zig");
 const io_mod = @import("../../core/shared/io.zig");
@@ -27,7 +28,22 @@ pub const readsOnly = fetch_args.readsOnly;
 pub const isIrreversible = fetch_args.isIrreversible;
 
 pub fn call(ctx: tool_dispatch.DispatchContext, erased: tool_dispatch.ToolInput) tool_dispatch.DispatchError!tool_dispatch.ToolResult {
+    // `http_fetch` is raw BSD sockets and poll, neither of which exists on
+    // Windows. This is the only reference that forces its analysis, so
+    // returning before it keeps the whole transport out of the Windows build.
+    if (comptime builtin.os.tag == .windows) {
+        return .{ .failure = try platformUnsupportedBody(ctx.allocator) };
+    }
     return callWithTransport(ctx, erased, http_fetch.defaultTransport());
+}
+
+fn platformUnsupportedBody(alloc: Allocator) tool_dispatch.DispatchError![]u8 {
+    return tool_result_errors.toolExecutionFailureJson(alloc, .{
+        .tool_name = "web_fetch",
+        .message = "web_fetch is not available on this platform",
+        .details = &[_]tool_result_errors.Detail{},
+        .suggestion = "Use web_search instead. web_fetch's HTTP transport has not been ported to Windows.",
+    });
 }
 
 fn callWithTransport(ctx: tool_dispatch.DispatchContext, erased: tool_dispatch.ToolInput, transport: http_fetch.Transport) tool_dispatch.DispatchError!tool_dispatch.ToolResult {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdio = @import("../core/shared/stdio.zig");
 const activity_runtime = @import("../core/output/activity_runtime.zig");
 const builtin = @import("builtin");
 const debug_trace = @import("../core/shared/debug_trace.zig");
@@ -37,6 +38,11 @@ extern "c" fn ptsname(fd: c_int) ?[*:0]u8;
 pub const supports_resize_signal = resize_runtime.supports_resize_signal;
 pub const ResizeHandler = if (builtin.os.tag == .wasi)
     *const fn () callconv(.c) void
+else if (builtin.os.tag == .windows)
+    // `std.posix.Sigaction` is `void` on Windows, which has no signals. The
+    // shape is kept so the handler constant still type-checks; nothing
+    // installs it. Console resize arrives with the ConPTY backend in phase 4.
+    *const fn (std.posix.SIG) callconv(.c) void
 else
     std.posix.Sigaction.handler_fn;
 pub const ResizeApprovalInterlock = resize_runtime.ResizeApprovalInterlock;
@@ -64,7 +70,7 @@ pub const AlternateScreenOwner = enum {
 };
 
 pub const TerminalState = struct {
-    stdin_fd: std.posix.fd_t = std.posix.STDIN_FILENO,
+    stdin_fd: std.posix.fd_t = stdio.default_stdin,
     original_termios: std.posix.termios = undefined,
     raw_enabled: bool = false,
     alternate_screen_owner: AlternateScreenOwner = .none,
@@ -95,17 +101,23 @@ pub const TerminalState = struct {
 
     pub fn ensureInteractive(self: TerminalState) !void {
         if (comptime builtin.os.tag == .wasi) return;
+        if (comptime builtin.os.tag == .windows) return error.NotATerminal;
         if (std.c.isatty(self.stdin_fd) == 0 or std.c.isatty(std.posix.STDOUT_FILENO) == 0) {
             return error.NotATerminal;
         }
     }
 
     pub fn captureOriginalTermios(self: *TerminalState) !void {
+        // termios has no Windows counterpart; console raw mode arrives with
+        // the ConPTY backend in phase 4.
+        if (comptime builtin.os.tag == .windows) return error.NotATerminal;
+
         if (comptime builtin.os.tag == .wasi) return;
         self.original_termios = try std.posix.tcgetattr(self.stdin_fd);
     }
 
     pub fn enableRawMode(self: *TerminalState) !void {
+        if (comptime builtin.os.tag == .windows) return error.NotATerminal;
         if (comptime builtin.os.tag == .wasi) {
             self.raw_enabled = true;
             return;
@@ -140,6 +152,7 @@ pub const TerminalState = struct {
     }
 
     pub fn disableRawMode(self: *TerminalState) void {
+        if (comptime builtin.os.tag == .windows) return;
         if (!self.raw_enabled) return;
         if (comptime builtin.os.tag != .wasi) {
             std.posix.tcsetattr(self.stdin_fd, .FLUSH, self.original_termios) catch {};
@@ -250,6 +263,11 @@ pub const TerminalState = struct {
     }
 
     pub fn read(self: TerminalState, out: []u8) !usize {
+        // Windows has no integer stdin descriptor, so it takes the same
+        // portable path as wasi.
+        if (comptime builtin.os.tag == .windows) {
+            return std.Io.File.stdin().readStreaming(io_mod.getIo(), &.{out});
+        }
         if (comptime builtin.os.tag == .wasi) {
             return std.Io.File.stdin().readStreaming(io_mod.getIo(), &.{out});
         }
@@ -257,6 +275,9 @@ pub const TerminalState = struct {
     }
 
     pub fn pollInput(self: TerminalState, timeout_ms: i32) !PollResult {
+        // `poll` is POSIX-only and `std.c.pollfd` does not exist for Windows.
+        // The interactive event loop arrives with the ConPTY backend in phase 4.
+        if (comptime builtin.os.tag == .windows) return error.NotATerminal;
         if (comptime builtin.os.tag == .wasi) {
             return switch (wasm_terminal.pollInput(timeout_ms)) {
                 1 => .{ .readable = true },

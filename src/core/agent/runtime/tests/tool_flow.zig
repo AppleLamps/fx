@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../../../shared/file_permissions.zig");
 const builtin = @import("builtin");
 const builtin_context = @import("../../../../builtins/context.zig");
 const builtin_tools = @import("../../../../builtins/tools.zig");
@@ -1070,7 +1071,7 @@ test "terminal acquire stays tracked when execution fails after its effect" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        file_permissions.private_dir,
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,
@@ -3811,7 +3812,7 @@ test "terminal publication failure deletes retained command replay" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        file_permissions.private_dir,
     );
     var session_dir = try tmp.dir.openDir(io_mod.getIo(), "session", .{
         .iterate = true,

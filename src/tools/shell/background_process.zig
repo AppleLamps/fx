@@ -36,12 +36,20 @@ const blocked_background_wrapper_command = std.fmt.comptimePrint(
     .{ background_ready_byte, background_exit_marker },
 );
 
-pub const provider = background_process_provider.Provider{
-    .spawn_prepared_fn = spawnPrepared,
-    .capture_token_fn = captureToken,
-    .match_token_fn = matchToken,
-    .signal_process_fn = signalProcess,
-};
+/// Background processes are deferred from the Windows v1 surface. Taking
+/// these function pointers is what forces analysis of the signal- and
+/// process-group-shaped implementation below, so Windows selects the
+/// unavailable provider here rather than gating each function. Job Objects
+/// replace that implementation in phase 2.
+pub const provider = if (builtin.os.tag == .windows)
+    background_process_provider.unavailable_provider
+else
+    background_process_provider.Provider{
+        .spawn_prepared_fn = spawnPrepared,
+        .capture_token_fn = captureToken,
+        .match_token_fn = matchToken,
+        .signal_process_fn = signalProcess,
+    };
 
 const PreparedState = struct {
     alloc: Allocator,
@@ -488,6 +496,10 @@ fn signalProcess(
 }
 
 fn signalPidTree(root_pid: std.posix.pid_t) std.posix.KillError!void {
+    // Background processes are deferred from the Windows v1 surface, and this
+    // routine is signal- and process-group-shaped throughout. Job Objects
+    // replace it in phase 2.
+    if (comptime builtin.os.tag == .windows) return error.ProcessNotFound;
     const descendants = collectDescendantPids(
         std.heap.page_allocator,
         root_pid,

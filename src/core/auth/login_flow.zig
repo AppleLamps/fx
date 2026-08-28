@@ -1002,6 +1002,9 @@ fn unavailableWaitForEnter(_: ?*anyopaque, _: u64) bool {
 }
 
 fn realWaitForEnter(_: ?*anyopaque, timeout_ms: u64) bool {
+    // `poll` is POSIX-only and `std.c.pollfd` does not exist for Windows, so
+    // the timed "press enter" prompt degrades to the unavailable behaviour.
+    if (comptime builtin.os.tag == .windows) return false;
     var fds = [_]std.posix.pollfd{.{
         .fd = std.posix.STDIN_FILENO,
         .events = std.posix.POLL.IN,
@@ -1112,9 +1115,12 @@ fn selectTeam(alloc: Allocator, teams: []const Team, current: ?[]const u8) !?usi
 
     const default_index = defaultTeamIndex(teams, current);
     const index = if (canUseInteractiveTeamPicker())
-        selectTeamInteractive(alloc, teams, default_index) catch |err| switch (err) {
-            error.NotATerminal => try selectTeamByLine(alloc, teams, default_index),
-            else => return err,
+        selectTeamInteractive(alloc, teams, default_index) catch |err| blk: {
+            // On Windows the interactive picker only ever reports
+            // `NotATerminal`, so a switch prong for anything else would be
+            // an unreachable `else`.
+            if (err != error.NotATerminal) return err;
+            break :blk try selectTeamByLine(alloc, teams, default_index);
         }
     else
         try selectTeamByLine(alloc, teams, default_index);
@@ -1153,6 +1159,10 @@ fn selectTeamByLine(alloc: Allocator, teams: []const Team, default_index: usize)
 }
 
 fn selectTeamInteractive(alloc: Allocator, teams: []const Team, default_index: usize) !usize {
+    // Raw-mode arrow-key selection is termios-shaped; the Windows console
+    // equivalent lands with the auth work in phase 3. Callers fall back to
+    // the numbered prompt.
+    if (comptime builtin.os.tag == .windows) return error.NotATerminal;
     var raw = try TeamPickerRawMode.enable();
     defer raw.disable();
 
@@ -1185,7 +1195,8 @@ fn selectTeamInteractive(alloc: Allocator, teams: []const Team, default_index: u
 
 fn canUseInteractiveTeamPicker() bool {
     const stdin_tty = std.Io.File.stdin().isTty(io_mod.getIo()) catch false;
-    return stdin_tty and std.c.isatty(std.posix.STDOUT_FILENO) != 0;
+    const stdout_tty = std.Io.File.stdout().isTty(io_mod.getIo()) catch false;
+    return stdin_tty and stdout_tty;
 }
 
 fn renderTeamPicker(

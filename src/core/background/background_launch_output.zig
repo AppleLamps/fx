@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../shared/file_permissions.zig");
 const background_process_provider = @import(
     "../execution/background_process_provider.zig",
 );
@@ -131,7 +132,7 @@ pub fn prepareExternal(alloc: Allocator) !Output {
                 .read = true,
                 .truncate = false,
                 .exclusive = true,
-                .permissions = std.Io.File.Permissions.fromMode(0o600),
+                .permissions = file_permissions.private_file,
             },
         ) catch |err| switch (err) {
             error.PathAlreadyExists => {
@@ -185,7 +186,7 @@ test "background launch output removes managed log on cancellation" {
     try tmp.dir.createDir(
         io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        file_permissions.private_dir,
     );
     const display_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "session");
     defer alloc.free(display_path);

@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../shared/file_permissions.zig");
 const config_runtime = @import("../config/config_runtime.zig");
 const io_mod = @import("../shared/io.zig");
 
@@ -239,7 +240,7 @@ fn ensureManagedDir(parent_path: []const u8, child_name: []const u8) !void {
             .follow_symlinks = false,
         }) catch |err| switch (err) {
             error.FileNotFound => {
-                parent.createDir(zio, child_name, std.Io.File.Permissions.fromMode(0o700)) catch |create_err| switch (create_err) {
+                parent.createDir(zio, child_name, file_permissions.private_dir) catch |create_err| switch (create_err) {
                     error.PathAlreadyExists => continue,
                     error.NotDir, error.SymLinkLoop => return error.CorruptArtifactStore,
                     else => return create_err,
@@ -251,10 +252,10 @@ fn ensureManagedDir(parent_path: []const u8, child_name: []const u8) !void {
             else => return err,
         };
         defer child.close(zio);
-        child.setPermissions(zio, std.Io.File.Permissions.fromMode(0o700)) catch
+        child.setPermissions(zio, file_permissions.private_dir) catch
             return error.CorruptArtifactStore;
         const stat = try child.stat(zio);
-        if (stat.kind != .directory or stat.permissions.toMode() & 0o777 != 0o700) {
+        if (stat.kind != .directory or !file_permissions.isExactlyPrivateDir(stat.permissions)) {
             return error.CorruptArtifactStore;
         }
         return;

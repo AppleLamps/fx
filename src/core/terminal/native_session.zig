@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../shared/file_permissions.zig");
 const builtin = @import("builtin");
 const contracts = @import("contracts.zig");
 const monitor_core = @import("monitor.zig");
@@ -41,7 +42,7 @@ const marker_ack_timeout_ms: i64 = tmux_session.marker_acknowledgement_timeout_m
 const command_release_byte: u8 = 2;
 const control_nonce_len: usize = 32;
 const marker_frame_len: usize = control_nonce_len + 1;
-const private_file_permissions = std.Io.File.Permissions.fromMode(0o600);
+const private_file_permissions = file_permissions.private_file;
 const default_dimensions: contracts.Dimensions = .{
     .rows = 24,
     .columns = 80,

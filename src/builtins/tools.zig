@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../core/shared/file_permissions.zig");
 const std_builtin = @import("builtin");
 const builtin_gateway = @import("gateway.zig");
 const terminal_contracts = @import("../core/terminal/contracts.zig");
@@ -1725,7 +1726,7 @@ test "terminal dispatch is permission gated and fails closed when unavailable" {
     try tmp.dir.createDir(
         test_io_mod.getIo(),
         "session",
-        std.Io.File.Permissions.fromMode(0o700),
+        file_permissions.private_dir,
     );
     var session_dir = try tmp.dir.openDir(test_io_mod.getIo(), "session", .{
         .iterate = true,

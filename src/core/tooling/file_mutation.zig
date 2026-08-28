@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_permissions = @import("../shared/file_permissions.zig");
 const builtin = @import("builtin");
 const diff_mod = @import("../output/diff.zig");
 const file_mutation_contract = @import("file_mutation_contract.zig");
@@ -1001,9 +1002,10 @@ fn validatePreimage(
             const expected_identity = prepared.policy_targets.items[0].expected_identity orelse
                 break :blk .stale;
             if (!identityEql(actual_identity, expected_identity)) break :blk .stale;
-            if (stat.permissions.toMode() & 0o222 == 0) break :blk .io_failure;
+            if (!file_permissions.isWritable(stat.permissions)) break :blk .io_failure;
             if (expected_permissions) |permissions| {
-                if (stat.permissions.toMode() != permissions.toMode()) break :blk .stale;
+                if (file_permissions.toRawBits(stat.permissions) !=
+                    file_permissions.toRawBits(permissions)) break :blk .stale;
             }
 
             var hasher = std.crypto.hash.sha2.Sha256.init(.{});

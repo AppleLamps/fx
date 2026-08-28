@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const debug_trace = @import("../shared/debug_trace.zig");
 const io_mod = @import("../shared/io.zig");
 
@@ -134,6 +135,15 @@ fn listenerReady(
     cancel_flag: *std.atomic.Value(bool),
 ) !bool {
     if (cancel_flag.load(.seq_cst)) return error.Cancelled;
+    // `poll` is POSIX-only and `std.c.pollfd` does not exist for Windows, so
+    // the loopback OAuth listener cannot be polled there. Reporting "not
+    // ready" rather than a new error keeps the error set identical across
+    // targets; the caller times out. The cancel check is kept so `Cancelled`
+    // stays in the inferred set. Browser-callback sign-in is phase 3 work.
+    if (comptime builtin.os.tag == .windows) {
+        if (cancel_flag.load(.seq_cst)) return error.Cancelled;
+        return false;
+    }
     var fds = [_]std.posix.pollfd{.{
         .fd = listener.socket.handle,
         .events = std.posix.POLL.IN,
@@ -153,6 +163,12 @@ fn requestReadable(
     cancel_flag: *std.atomic.Value(bool),
     deadline_ms: i64,
 ) !bool {
+    // As in `listenerReady`: report "not ready" so the error set is
+    // unchanged across targets and the caller times out.
+    if (comptime builtin.os.tag == .windows) {
+        if (cancel_flag.load(.seq_cst)) return error.Cancelled;
+        return false;
+    }
     while (true) {
         if (cancel_flag.load(.seq_cst)) return error.Cancelled;
         const remaining_ms = deadline_ms - io_mod.milliTimestamp();
