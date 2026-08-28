@@ -134,7 +134,12 @@ run on this branch and on the pre-phase-1 commit `ef6eb04`:
 | phase 1 | 8606 | 8556 | 21 | 29 |
 
 The failing sets are identical: **no test fails on this branch that did not
-already fail on the base.** The 29 failures are pre-existing in this
+already fail on the base.**
+
+> Later note: re-measured against `main` during phase 2, the pre-existing
+> failure count is 30 rather than 29. The container drifted between the two
+> runs; see the phase 2 results for the detail. The comparison above is still
+> valid, because both rows were measured together — which is the point. The 29 failures are pre-existing in this
 container — `command_runner` cases exercising `setsid`, double-forked
 descendants, and signal-driven teardown, which need a fuller process
 environment than a sandbox provides. The `+11` in total and pass is exactly

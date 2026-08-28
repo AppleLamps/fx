@@ -2,6 +2,13 @@
 
 Status: proposal. No implementation in this document.
 
+> **Phase 2 is complete for everything provable here.** Job Objects, the
+> PowerShell strategy, and Windows foreground execution have landed, and
+> `fx.exe` now actually runs under wine. See
+> [`windows-port-phase2.md`](windows-port-phase2.md) — including what stays
+> unproven without a Windows host (`background_processes` remains off) and why
+> the DACL check is still deliberately open.
+>
 > **Phase 1 is complete.** `fx.exe` builds and links for `x86_64-windows`
 > with POSIX behavior measured unchanged. See
 > [`windows-port-phase1.md`](windows-port-phase1.md) — including the open
