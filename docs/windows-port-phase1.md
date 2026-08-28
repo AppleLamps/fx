@@ -65,6 +65,30 @@ This invalidated the natural design. `readOnly()` appears on both platforms
 and looks like the portable spelling of `mode & 0o222 == 0`; it is not. On
 Windows only the enum tags and `@intFromEnum` are sound.
 
+## Two path-resolution traps found in review
+
+Both were in the new Windows `realpath` helpers, both affect containment
+checks, and neither fails loudly.
+
+`dirRealpathAlloc` returned `join(dir_path, sub_path)` unresolved on Windows
+while the POSIX branches pass the join through `realpathAlloc`. That skips
+canonicalization of `..`, symlinks, and junctions, and makes
+`dirRealpathAlloc(dir, "missing")` succeed with a fabricated path — so a
+caller using it to prove existence or obtain a canonical identity could
+authorize the wrong one. The branch is now structurally identical to the
+POSIX ones: acquire, join, resolve.
+
+`GetFinalPathNameByHandleW` returns a UNC handle as
+`\\?\UNC\server\share\...`. Stripping only the `\\?\` prefix leaves
+`UNC\server\share\...` — a **relative** path. A home or workspace on a
+network share would canonicalize to somewhere else entirely, silently. The UNC
+form is now rewritten to `\\server\share\...`, and that test has to precede
+the general prefix strip because `\\?\UNC\` starts with `\\?\`.
+
+The general lesson for later phases: a Windows path helper that looks right for
+`C:\...` can still be wrong for the UNC and long-path forms of the same API,
+and the wrongness is a silently incorrect location rather than an error.
+
 ## Masked API-key entry declines on Windows
 
 Hiding a pasted key as it is typed needs `SetConsoleMode`, which is not in
