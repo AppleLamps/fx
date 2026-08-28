@@ -193,9 +193,26 @@ reach code the compiler has not yet analyzed.
 3. **`main.zig` args/env** — startup-blocking, small, self-contained.
 4. **`dirRealpathAlloc`** and the **`File.stdout()` field default** — two
    isolated fixes.
-5. **Gate `ui/shell_runtime.zig`** rather than porting it; the interactive
-   shell is phase 4 work.
+5. **Gate the deferred code paths** rather than porting them. Three sites:
+   `ui/shell_runtime.zig` (interactive shell, phase 4), `background_process.zig`'s
+   pid arithmetic (Job Objects replace it wholesale in phase 2), and the
+   WebFetch tool.
 
-Cluster B's pid arithmetic in `background_process.zig` should be *gated*, not
-ported, in phase 1 — background processes are deferred from v1, and the Job
-Object work in phase 2 replaces that code wholesale.
+### Deferring a tool is not the same as gating it
+
+WebFetch deserves its own note because the obvious reading of "deferred from
+v1" is wrong. `src/builtins/tools.zig:32` imports `web_fetch_impl`
+unconditionally, and `:783-787` stores pointers to its `decode`, `validate`,
+`call`, `readsOnly`, and `irreversible` functions in a `ToolSpec`. **Taking a
+function pointer forces analysis of that function**, so `http_fetch.zig` is
+compiled on Windows no matter what any scope table says, and cluster B's
+`http_fetch.zig:1297` and `std/c.zig:4299` errors survive.
+
+Removing the tool from a runtime registry list is not enough either — the
+`ToolSpec` fn pointers are the thing that pulls it in. The gate has to be
+comptime and has to sit at or above the `ToolSpec`, either swapping
+`web_fetch_impl` for a stub on Windows or omitting the spec itself.
+
+This is finding 1 of the plan restated: **only comptime gates prune code.**
+Scope decisions recorded in a document prune nothing. Every entry on the
+deferred list needs a real gate before phase 1 can claim a compiling binary.

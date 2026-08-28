@@ -167,7 +167,9 @@ API-key and OAuth login.
 `src/tools/web/http_fetch.zig` carries 3,883 lines of raw BSD sockets and
 `poll`, but its only importer is `src/tools/web/fetch.zig`, and the model
 gateway runs on portable `std.http.Client`, so deferring it costs nothing that
-v1 needs. Also: the interactive TUI and terminal sessions;
+v1 needs. Note that deferring it is not self-executing: `builtins/tools.zig:32`
+imports it unconditionally and `:783-787` takes function pointers into it, so
+it needs a real comptime gate to stop being compiled. Also: the interactive TUI and terminal sessions;
 background/detached processes; the direct read-only fast path; native
 clipboard; tmux-based session recovery; the E2E suite on Windows; a native
 credential-manager backend.
