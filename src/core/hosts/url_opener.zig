@@ -155,10 +155,12 @@ test "url opener passes an OAuth query string through as one argument" {
 }
 
 test "url opener reports unsupported platforms without launching" {
+    // This used `.windows` until Windows gained an arm. The assertion is about
+    // the `else` prong, so it needs a target that still has no launcher.
     const alloc = std.testing.allocator;
     var mock = MockLauncher{};
     defer mock.deinit(alloc);
-    try std.testing.expectEqual(LaunchOutcome.unsupported, launchUrl(alloc, "http://x", .windows, mock.launcher()));
+    try std.testing.expectEqual(LaunchOutcome.unsupported, launchUrl(alloc, "http://x", .freebsd, mock.launcher()));
     try std.testing.expectEqualStrings("", mock.argv_joined.items);
 }
 
