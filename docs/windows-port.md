@@ -1,6 +1,8 @@
 # Windows platform port — scope, sequencing, and phase plan
 
-Status: proposal. No implementation in this document.
+Status: phases 0 through 2 are implemented; see the phase reports linked
+below. Phase 2 is not verified end to end. This document remains the plan of
+record for the scope and sequencing; the code lives in the tree.
 
 > **Phase 2 has landed but is not verified end to end.** Job Objects, the
 > PowerShell strategy, and Windows foreground execution are implemented, and

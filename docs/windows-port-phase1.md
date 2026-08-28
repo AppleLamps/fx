@@ -139,7 +139,9 @@ already fail on the base.**
 > Later note: re-measured against `main` during phase 2, the pre-existing
 > failure count is 30 rather than 29. The container drifted between the two
 > runs; see the phase 2 results for the detail. The comparison above is still
-> valid, because both rows were measured together — which is the point. The 29 failures are pre-existing in this
+> valid, because both rows were measured together — which is the point.
+
+The 29 failures are pre-existing in this
 container — `command_runner` cases exercising `setsid`, double-forked
 descendants, and signal-driven teardown, which need a fuller process
 environment than a sandbox provides. The `+11` in total and pass is exactly
