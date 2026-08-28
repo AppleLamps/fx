@@ -18,6 +18,22 @@ so the build needed no network fetch.
 **Result: 30 compilation errors** — 25 in `src/`, 5 inside Zig's standard
 library triggered by our usage. Zero object files produced.
 
+### Control: the same toolchain builds the tree cleanly for Linux
+
+To rule out a toolchain artifact rather than a genuine platform gap, the same
+command was run without `-Dtarget`:
+
+```
+zig build -Doptimize=ReleaseSafe          → exit 0, 12 MB ELF x86-64 binary
+./zig-out/bin/fx help                     → exit 0, stdout non-empty, stderr empty
+./zig-out/bin/fx status --json            → exit 0, stdout non-empty, stderr empty
+```
+
+That is exactly the smoke test `full-ci.yml:59-75` runs on every native job,
+and it passes. Same toolchain, same tree, same optimize level: Linux produces a
+working binary, Windows fails during semantic analysis. **The 30 errors are
+platform-specific, not a toolchain mismatch.**
+
 ## The headline result reframes the port's size
 
 Nothing appeared from `native_session.zig`, `tmux_session.zig`,
