@@ -589,13 +589,13 @@ pub const Store = struct {
 
     /// Opens a writable store rooted at `$HOME`, creating the layout if needed.
     pub fn init(alloc: Allocator, workspace_root: []const u8) !Store {
-        const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+        const home = io_mod.homeDir() orelse return error.HomeNotSet;
         return initWithHome(alloc, home, workspace_root, true);
     }
 
     /// Opens a read-only store rooted at `$HOME`; never creates layout.
     pub fn initReadOnly(alloc: Allocator, workspace_root: []const u8) !Store {
-        const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+        const home = io_mod.homeDir() orelse return error.HomeNotSet;
         return initWithHome(alloc, home, workspace_root, false);
     }
 
@@ -4929,7 +4929,7 @@ fn loadedWriterBelongsToRoot(
 
 fn prepareWritableSessionDir(dir: std.Io.Dir) !void {
     const permissions = file_permissions.private_dir;
-    dir.setPermissions(io_mod.getIo(), permissions) catch
+    file_permissions.setDirPermissions(dir, io_mod.getIo(), permissions) catch
         return error.PrivateStatePermissionsUnsupported;
     const stat = try dir.stat(io_mod.getIo());
     if (stat.kind != .directory) return error.SessionPathUnsafe;

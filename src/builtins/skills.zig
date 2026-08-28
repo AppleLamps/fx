@@ -43,7 +43,7 @@ pub fn loadVisibleSkillsForTool(
     workspace_root: []const u8,
     skills_dir: []const u8,
 ) !skill_runtime.SkillDiscovery {
-    const home = io_mod.getenv("HOME") orelse homeFromSkillsDir(skills_dir);
+    const home = io_mod.homeDir() orelse homeFromSkillsDir(skills_dir);
     return skill_runtime.loadVisibleSkills(
         alloc,
         workspace_root,

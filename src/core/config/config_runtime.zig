@@ -230,7 +230,7 @@ pub const DetailedSettings = struct {
 };
 
 pub fn discoverPaths(alloc: Allocator, workspace_root: []const u8) !Paths {
-    return discoverPathsWithOptionalHome(alloc, io_mod.getenv("HOME"), workspace_root);
+    return discoverPathsWithOptionalHome(alloc, io_mod.homeDir(), workspace_root);
 }
 
 pub fn discoverPathsFromHome(alloc: Allocator, home_dir: []const u8, workspace_root: []const u8) !Paths {
@@ -247,7 +247,7 @@ pub fn loadProjectMcpChoices(
     alloc: Allocator,
     workspace_root: []const u8,
 ) !ProjectMcpChoiceLoad {
-    const home = io_mod.getenv("HOME") orelse return .{};
+    const home = io_mod.homeDir() orelse return .{};
     return loadProjectMcpChoicesFromHome(alloc, home, workspace_root);
 }
 
@@ -299,7 +299,7 @@ pub fn loadMergedSettingsDetailedFromHome(
 }
 
 pub fn loadMergedSettingsDetailed(alloc: Allocator, workspace_root: []const u8) !DetailedSettings {
-    return loadMergedSettingsDetailedWithOptionalHome(alloc, io_mod.getenv("HOME"), workspace_root);
+    return loadMergedSettingsDetailedWithOptionalHome(alloc, io_mod.homeDir(), workspace_root);
 }
 
 fn loadMergedSettingsDetailedWithOptionalHome(
@@ -803,7 +803,7 @@ fn ensureAbsoluteDir(path_abs: []const u8) !void {
 }
 
 pub fn userSettingsPath(alloc: Allocator) !?[]u8 {
-    const home = io_mod.getenv("HOME") orelse return null;
+    const home = io_mod.homeDir() orelse return null;
     return try profile_paths.settingsPath(alloc, home);
 }
 
@@ -843,7 +843,7 @@ pub fn attemptUserPreferences(
     alloc: Allocator,
     patch: UserSettingsPatch,
 ) CommitAttempt {
-    const home = io_mod.getenv("HOME") orelse return .{ .failure = .{ .err = error.HomeNotSet } };
+    const home = io_mod.homeDir() orelse return .{ .failure = .{ .err = error.HomeNotSet } };
     var store = settings_store.Store.initFromHome(alloc, home, .writable) catch |err| {
         return .{ .failure = .{ .err = err } };
     };
@@ -862,7 +862,7 @@ pub fn attemptProjectMcpMutation(
     workspace_root: []const u8,
     action: project_config.ProjectMcpAction,
 ) CommitAttempt {
-    const home = io_mod.getenv("HOME") orelse return .{ .failure = .{ .err = error.HomeNotSet } };
+    const home = io_mod.homeDir() orelse return .{ .failure = .{ .err = error.HomeNotSet } };
     var store = settings_store.Store.initFromHome(alloc, home, .writable) catch |err| {
         return .{ .failure = .{ .err = err } };
     };
@@ -881,7 +881,7 @@ pub fn setUserPreferences(
     alloc: Allocator,
     patch: UserSettingsPatch,
 ) !CommitOutcome {
-    const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+    const home = io_mod.homeDir() orelse return error.HomeNotSet;
     var store = try settings_store.Store.initFromHome(alloc, home, .writable);
     defer store.deinit(alloc);
     return store.applyUserPatch(alloc, patch);
@@ -891,7 +891,7 @@ pub fn mutateWorkspaceDirectory(
     alloc: Allocator,
     mutation: WorkspaceDirectoryMutation,
 ) !CommitOutcome {
-    const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+    const home = io_mod.homeDir() orelse return error.HomeNotSet;
     var store = try settings_store.Store.initFromHome(alloc, home, .writable);
     defer store.deinit(alloc);
     return store.applyWorkspaceDirectoryPatch(alloc, mutation);
@@ -901,7 +901,7 @@ pub fn mutatePermission(
     alloc: Allocator,
     mutation: PermissionMutation,
 ) !CommitOutcome {
-    const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+    const home = io_mod.homeDir() orelse return error.HomeNotSet;
     var store = try settings_store.Store.initFromHome(alloc, home, .writable);
     defer store.deinit(alloc);
     return store.applyPermissionPatch(alloc, mutation);

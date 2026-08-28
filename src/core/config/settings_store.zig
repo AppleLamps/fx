@@ -357,7 +357,7 @@ pub const Store = struct {
         errdefer durable_home.close(zio);
 
         if (mode == .writable) {
-            durable_home.setPermissions(zio, file_permissions.private_dir) catch {
+            file_permissions.setDirPermissions(durable_home, zio, file_permissions.private_dir) catch {
                 return error.PrivateStatePermissionsUnsupported;
             };
         }

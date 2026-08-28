@@ -511,7 +511,7 @@ pub fn addProfileServer(
     alloc: Allocator,
     intent: command_provider_contract.AddIntent,
 ) !command_provider_contract.ProfileAddResult {
-    const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+    const home = io_mod.homeDir() orelse return error.HomeNotSet;
     const config_path = try configPathFromHome(alloc, home);
     errdefer alloc.free(config_path);
     const warning = try addProfileServerToPath(alloc, config_path, intent);
@@ -522,7 +522,7 @@ pub fn removeProfileServer(
     alloc: Allocator,
     name: []const u8,
 ) !command_provider_contract.ProfileRemoveResult {
-    const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+    const home = io_mod.homeDir() orelse return error.HomeNotSet;
     const config_path = try configPathFromHome(alloc, home);
     errdefer alloc.free(config_path);
     const result = try removeProfileServerFromPath(alloc, config_path, name);
@@ -540,7 +540,7 @@ pub fn loadRuntime(
 ) !?*mcp_runtime.McpRuntime {
     var profile: std.ArrayList(McpServerConfig) = .empty;
     defer freeConfigs(alloc, &profile);
-    if (io_mod.getenv("HOME")) |home| {
+    if (io_mod.homeDir()) |home| {
         const config_path = try configPathFromHome(alloc, home);
         defer alloc.free(config_path);
         profile = try loadConfigFromPath(alloc, config_path);
@@ -642,7 +642,7 @@ fn traceWorkspaceDiagnostics(diagnostics: []const project_config.WorkspaceDiagno
 pub fn inspectProfileConfig(
     alloc: Allocator,
 ) error{OutOfMemory}!mcp_contract.ProfileConfigDiagnostic {
-    const home = io_mod.getenv("HOME") orelse return .clear;
+    const home = io_mod.homeDir() orelse return .clear;
     const config_path = try configPathFromHome(alloc, home);
     defer alloc.free(config_path);
 
@@ -664,7 +664,7 @@ pub fn inspectLocalConfig(
     var profile: std.ArrayList(McpServerConfig) = .empty;
     defer freeConfigs(alloc, &profile);
     var profile_diagnostic: mcp_contract.ProfileConfigDiagnostic = .clear;
-    if (io_mod.getenv("HOME")) |home| {
+    if (io_mod.homeDir()) |home| {
         const config_path = try configPathFromHome(alloc, home);
         defer alloc.free(config_path);
         var document = loadProfileDocumentFromPath(alloc, config_path) catch |err| {

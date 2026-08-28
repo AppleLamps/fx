@@ -372,7 +372,7 @@ fn openOrCreateLockedDir() !LockedDir {
 fn openOrCreateLockedDirControlled(
     cancel_flag: ?*const std.atomic.Value(bool),
 ) !LockedDir {
-    const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+    const home = io_mod.homeDir() orelse return error.HomeNotSet;
     var home_dir = io_mod.VerifiedDir{
         .dir = try std.Io.Dir.openDirAbsolute(io_mod.getIo(), home, .{ .iterate = true }),
     };
@@ -411,7 +411,7 @@ fn openExistingLockedDir() !?LockedDir {
 fn openExistingLockedDirControlled(
     cancel_flag: ?*const std.atomic.Value(bool),
 ) !?LockedDir {
-    const home = io_mod.getenv("HOME") orelse return error.HomeNotSet;
+    const home = io_mod.homeDir() orelse return error.HomeNotSet;
     var home_dir = io_mod.VerifiedDir{
         .dir = try std.Io.Dir.openDirAbsolute(io_mod.getIo(), home, .{
             .iterate = true,
