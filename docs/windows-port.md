@@ -1,7 +1,19 @@
 # Windows platform port — scope, sequencing, and phase plan
 
-Status: proposal. No implementation in this document.
+Status: phases 0 through 2 are implemented; see the phase reports linked
+below. Phase 2 is not verified end to end. This document remains the plan of
+record for the scope and sequencing; the code lives in the tree.
 
+> **Phase 2 has landed but is not verified end to end.** Job Objects, the
+> PowerShell strategy, and Windows foreground execution are implemented, and
+> `fx.exe` runs under wine — but the changed happy path, a command actually
+> executing through PowerShell and a Job Object, has never been driven. Per
+> `AGENTS.md`, that means this is not "done": it needs verification on a real
+> Windows host. See
+> [`windows-port-phase2.md`](windows-port-phase2.md) — including what stays
+> unproven without a Windows host (`background_processes` remains off) and why
+> the DACL check is still deliberately open.
+>
 > **Phase 1 is complete.** `fx.exe` builds and links for `x86_64-windows`
 > with POSIX behavior measured unchanged. See
 > [`windows-port-phase1.md`](windows-port-phase1.md) — including the open

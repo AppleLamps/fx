@@ -14,29 +14,65 @@ pub const ResolveError = error{
 pub const Profile = command_environment.Profile;
 pub const Environment = command_environment.Environment;
 
-const ShellKind = enum { bash, zsh };
+const ShellKind = enum { bash, zsh, powershell };
+
+/// Windows PowerShell 5.1 ships with every supported Windows install; PowerShell 7
+/// (`pwsh.exe`) does not, so it is recognized but never chosen as the default.
+const windows_default_shell = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+
+/// Splits on both separators so a Windows shell path can be classified while
+/// running on POSIX, which is what the tests below rely on.
+fn shellBasename(path: []const u8) []const u8 {
+    const separator = std.mem.lastIndexOfAny(u8, path, "/\\") orelse return path;
+    return path[separator + 1 ..];
+}
+
+fn eqlShellName(basename: []const u8, expected: []const u8) bool {
+    // Windows filenames are case-insensitive, and the extension is optional in
+    // configuration even though the real executable carries one.
+    if (std.ascii.eqlIgnoreCase(basename, expected)) return true;
+    if (basename.len <= 4) return false;
+    if (!std.ascii.eqlIgnoreCase(basename[basename.len - 4 ..], ".exe")) return false;
+    return std.ascii.eqlIgnoreCase(basename[0 .. basename.len - 4], expected);
+}
 
 fn shellKind(path: []const u8) ?ShellKind {
-    const basename = std.fs.path.basename(path);
+    const basename = shellBasename(path);
     if (std.mem.eql(u8, basename, "bash")) return .bash;
     if (std.mem.eql(u8, basename, "zsh")) return .zsh;
+    if (eqlShellName(basename, "powershell")) return .powershell;
+    if (eqlShellName(basename, "pwsh")) return .powershell;
     return null;
 }
 
 fn fallbackLoginShell() []const u8 {
+    if (builtin.os.tag == .windows) return windows_default_shell;
     return if (builtin.os.tag == .macos) "/bin/zsh" else "/bin/bash";
 }
 
+/// `std.fs.path.isAbsolute` follows the host's rules, but a Windows shell path
+/// is drive-qualified rather than root-anchored.
+fn isAbsoluteShellPath(path: []const u8) bool {
+    if (comptime builtin.os.tag == .windows) return std.fs.path.isAbsoluteWindows(path);
+    return std.fs.path.isAbsolute(path);
+}
+
 fn supportedLoginShell(configured_login_shell: ?[]const u8) ResolveError![]const u8 {
-    const path = configured_login_shell orelse return error.MissingLoginShell;
-    if (!std.fs.path.isAbsolute(path)) return error.RelativeShellPath;
+    const path = configured_login_shell orelse blk: {
+        // There is no passwd database to read a login shell from on Windows,
+        // so the system PowerShell stands in for one.
+        if (comptime builtin.os.tag == .windows) break :blk fallbackLoginShell();
+        return error.MissingLoginShell;
+    };
+    if (!isAbsoluteShellPath(path)) return error.RelativeShellPath;
     if (shellKind(path) != null) return path;
     return fallbackLoginShell();
 }
 
 pub const Invocation = struct {
     path: []const u8,
-    values: [6][]const u8 = @splat(""),
+    kind: ShellKind = .bash,
+    values: [8][]const u8 = @splat(""),
     len: usize = 0,
 
     pub fn argv(self: *const Invocation) []const []const u8 {
@@ -49,7 +85,15 @@ pub const Invocation = struct {
     }
 
     pub fn setCommand(self: *Invocation, command: []const u8) void {
-        self.append("-c");
+        switch (self.kind) {
+            .bash, .zsh => self.append("-c"),
+            // PowerShell has no `-c`; `-Command` must also come last, since it
+            // treats every following argument as part of the command text.
+            .powershell => {
+                self.append("-NonInteractive");
+                self.append("-Command");
+            },
+        }
         self.append(command);
     }
 };
@@ -72,15 +116,19 @@ pub fn resolve(
             .clean_start = value.clean_start,
         },
     };
-    if (!std.fs.path.isAbsolute(selection.path)) {
+    if (!isAbsoluteShellPath(selection.path)) {
         return error.RelativeShellPath;
     }
 
     const kind = shellKind(selection.path) orelse return error.UnsupportedShell;
 
-    var result = Invocation{ .path = selection.path };
+    var result = Invocation{ .path = selection.path, .kind = kind };
     result.append(selection.path);
     switch (kind) {
+        .powershell => {
+            result.append("-NoLogo");
+            if (selection.clean_start) result.append("-NoProfile");
+        },
         .bash => {
             if (selection.clean_start) {
                 result.append("--noprofile");
@@ -187,7 +235,7 @@ pub fn capturedInvocation(
         },
         .user => |path| {
             var invocation = try resolve(path, .user_login);
-            if (std.mem.eql(u8, std.fs.path.basename(path), "bash")) {
+            if (std.mem.eql(u8, shellBasename(path), "bash")) {
                 removeInteractiveFlag(&invocation);
                 invocation.append("-O");
                 invocation.append("expand_aliases");
@@ -216,6 +264,9 @@ pub fn formatInvocationCommand(
 }
 
 fn removeInteractiveFlag(invocation: *Invocation) void {
+    // PowerShell never carries `-i`; non-interactivity is expressed by the
+    // `-NonInteractive` flag that `setCommand` adds instead.
+    if (invocation.kind == .powershell) return;
     std.debug.assert(invocation.len > 0);
     std.debug.assert(std.mem.eql(u8, invocation.values[invocation.len - 1], "-i"));
     invocation.len -= 1;
@@ -537,4 +588,75 @@ test "bootstrap construction cleans every allocation failure" {
         checkBootstrapAllocationFailures,
         .{},
     );
+}
+
+test "shell kind recognizes both PowerShell executables" {
+    try std.testing.expectEqual(ShellKind.powershell, shellKind(windows_default_shell).?);
+    try std.testing.expectEqual(ShellKind.powershell, shellKind("C:\\Program Files\\PowerShell\\7\\pwsh.exe").?);
+    // Windows filenames are case-insensitive and the extension is optional.
+    try std.testing.expectEqual(ShellKind.powershell, shellKind("C:\\bin\\POWERSHELL.EXE").?);
+    try std.testing.expectEqual(ShellKind.powershell, shellKind("C:\\bin\\PwSh").?);
+    try std.testing.expectEqual(ShellKind.powershell, shellKind("/usr/bin/pwsh").?);
+}
+
+test "shell kind still classifies the POSIX shells and rejects others" {
+    try std.testing.expectEqual(ShellKind.bash, shellKind("/bin/bash").?);
+    try std.testing.expectEqual(ShellKind.zsh, shellKind("/bin/zsh").?);
+    try std.testing.expect(shellKind("/bin/sh") == null);
+    try std.testing.expect(shellKind("/bin/fish") == null);
+    // `bash` is matched exactly, unlike the case-insensitive Windows names.
+    try std.testing.expect(shellKind("/bin/BASH") == null);
+}
+
+test "shell basename splits on either separator" {
+    try std.testing.expectEqualStrings("powershell.exe", shellBasename("C:\\Windows\\powershell.exe"));
+    try std.testing.expectEqualStrings("bash", shellBasename("/bin/bash"));
+    try std.testing.expectEqualStrings("bash", shellBasename("bash"));
+}
+
+test "PowerShell captured invocation is non-interactive and command-last" {
+    var invocation = Invocation{ .path = windows_default_shell, .kind = .powershell };
+    invocation.append(windows_default_shell);
+    invocation.append("-NoLogo");
+    invocation.append("-NoProfile");
+    removeInteractiveFlag(&invocation);
+    invocation.setCommand("Get-Location");
+
+    const argv = invocation.argv();
+    try std.testing.expectEqual(@as(usize, 6), argv.len);
+    try std.testing.expectEqualStrings(windows_default_shell, argv[0]);
+    try std.testing.expectEqualStrings("-NoLogo", argv[1]);
+    try std.testing.expectEqualStrings("-NoProfile", argv[2]);
+    try std.testing.expectEqualStrings("-NonInteractive", argv[3]);
+    // `-Command` must be last before the text: PowerShell treats everything
+    // after it as part of the command.
+    try std.testing.expectEqualStrings("-Command", argv[4]);
+    try std.testing.expectEqualStrings("Get-Location", argv[5]);
+}
+
+test "PowerShell keeps the profile unless a clean start is requested" {
+    var user = Invocation{ .path = windows_default_shell, .kind = .powershell };
+    user.append(windows_default_shell);
+    user.append("-NoLogo");
+    user.setCommand("Get-Location");
+    for (user.argv()) |word| {
+        try std.testing.expect(!std.mem.eql(u8, word, "-NoProfile"));
+    }
+}
+
+test "POSIX captured invocations keep their existing shape" {
+    // Regression guard: the PowerShell strategy must not disturb bash or zsh.
+    var bash = Invocation{ .path = "/bin/bash", .kind = .bash };
+    bash.append("/bin/bash");
+    bash.append("--login");
+    bash.append("-i");
+    removeInteractiveFlag(&bash);
+    bash.setCommand("pwd");
+
+    const argv = bash.argv();
+    try std.testing.expectEqual(@as(usize, 4), argv.len);
+    try std.testing.expectEqualStrings("/bin/bash", argv[0]);
+    try std.testing.expectEqualStrings("--login", argv[1]);
+    try std.testing.expectEqualStrings("-c", argv[2]);
+    try std.testing.expectEqualStrings("pwd", argv[3]);
 }

@@ -4068,6 +4068,7 @@ test {
     _ = @import("core/images/image_commands.zig");
     _ = @import("core/shared/io.zig");
     _ = @import("core/shared/file_permissions.zig");
+    _ = @import("core/execution/windows_job.zig");
     _ = @import("core/shared/message.zig");
     _ = @import("core/shared/token_estimate.zig");
     _ = @import("core/shell_command/command_effect.zig");
