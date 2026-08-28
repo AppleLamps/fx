@@ -2,6 +2,12 @@
 
 Status: proposal. No implementation in this document.
 
+> **Phase 0 has since been run.** See
+> [`windows-port-phase0.md`](windows-port-phase0.md) for the real compiler
+> output: 30 errors across 5 clusters. It confirms findings 1, 2, and 3,
+> corrects one claim below (marked inline), and adds two files this audit
+> missed. Where the two documents disagree, the compiler wins.
+
 `fx` targets macOS and Linux today. This document scopes a real Windows port:
 what ships in v1, what is deliberately deferred, and the order the work has to
 happen in. It is grounded in an audit of the current tree rather than on
@@ -60,7 +66,8 @@ places in the v1 path are not:
 | --- | --- |
 | `src/core/cli/cli_surface.zig:1904` | `MaskedKeyRawMode` — `std.posix.termios`, `tcgetattr`, `tcsetattr`, `std.c.isatty`, no gate. This is masked API-key entry. |
 | `src/core/auth/login_flow.zig:1275` | `TeamPickerRawMode` — same construct, same lack of gate. |
-| `src/core/hosts/native.zig` | Clipboard reaping uses `std.c.waitpid`, `std.c.W.*`, `std.posix.kill` ungated, even though `clipboardCommand` itself is a clean `os_tag` switch that already returns `null` for Windows. |
+| ~~`src/core/hosts/native.zig`~~ | ~~Clipboard reaping uses `std.c.waitpid`, `std.c.W.*`, `std.posix.kill` ungated.~~ **Wrong — corrected by phase 0.** These helpers are reachable only from `copy_file_to_clipboard`, which opens with a comptime macOS gate, so Zig prunes the chain. This file produces zero Windows errors. |
+| `src/ui/shell_runtime.zig` | *Added by phase 0.* Genuinely ungated `termios`, `posix_openpt`, and `poll`; errors at `:67`. Gate it — the interactive shell is phase 4 work. |
 
 `MaskedKeyRawMode` is reached from `cli_surface.zig:1867` on the API-key setup
 path — a v1 requirement. So the raw-mode input half of auth belongs in
@@ -156,7 +163,11 @@ config and session persistence; workspace file access, search, and git
 discovery; shell execution through the approval path; the permission system;
 API-key and OAuth login.
 
-**Out of scope, explicitly.** The interactive TUI and terminal sessions;
+**Out of scope, explicitly.** The WebFetch tool — phase 0 found
+`src/tools/web/http_fetch.zig` carries 3,883 lines of raw BSD sockets and
+`poll`, but its only importer is `src/tools/web/fetch.zig`, and the model
+gateway runs on portable `std.http.Client`, so deferring it costs nothing that
+v1 needs. Also: the interactive TUI and terminal sessions;
 background/detached processes; the direct read-only fast path; native
 clipboard; tmux-based session recovery; the E2E suite on Windows; a native
 credential-manager backend.
