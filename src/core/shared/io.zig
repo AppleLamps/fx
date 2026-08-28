@@ -977,10 +977,19 @@ pub fn dirRealpathAlloc(alloc: std.mem.Allocator, dir: std.Io.Dir, sub_path: []c
         defer alloc.free(joined);
         return realpathAlloc(alloc, joined);
     } else if (comptime builtin.os.tag == .windows) {
-        const dir_path = try windowsHandlePathAlloc(alloc, dir.handle);
+        const dir_path = windowsHandlePathAlloc(alloc, dir.handle) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.FileNotFound,
+        };
         if (sub_path.len == 0) return dir_path;
         defer alloc.free(dir_path);
-        return std.fs.path.join(alloc, &.{ dir_path, sub_path });
+        const joined = try std.fs.path.join(alloc, &.{ dir_path, sub_path });
+        defer alloc.free(joined);
+        // Resolving the join is what normalizes `..`, symlinks, and junctions.
+        // Returning the join unresolved would leave the containment checks
+        // built on this function comparing uncanonicalized paths on Windows
+        // while POSIX compares canonical ones.
+        return realpathAlloc(alloc, joined);
     } else if (comptime builtin.os.tag == .wasi) {
         if (std.fs.path.isAbsolute(sub_path)) return alloc.dupe(u8, sub_path);
         return std.fs.path.resolve(alloc, &.{sub_path});
@@ -1013,8 +1022,20 @@ fn windowsHandlePathAlloc(alloc: std.mem.Allocator, handle: std.posix.fd_t) ![]u
     if (len == 0 or len > wide.len) return error.FileNotFound;
 
     var path = wide[0..len];
-    // The normalized form is returned with a `\\?\` prefix that the rest of
-    // the codebase does not expect on ordinary paths.
+
+    // A UNC handle comes back as `\\?\UNC\server\share\...`. Stripping only the
+    // `\\?\` prefix would leave `UNC\server\share\...`, which is a *relative*
+    // path: a workspace on a network share would then be canonicalized to the
+    // wrong location. The UNC form has to be rewritten to `\\server\share\...`.
+    const unc_prefix = std.unicode.utf8ToUtf16LeStringLiteral("\\\\?\\UNC\\");
+    if (std.mem.startsWith(u16, path, unc_prefix)) {
+        const tail = try std.unicode.wtf16LeToWtf8Alloc(alloc, path[unc_prefix.len..]);
+        defer alloc.free(tail);
+        return std.fmt.allocPrint(alloc, "\\\\{s}", .{tail});
+    }
+
+    // An ordinary drive path comes back as `\\?\C:\...`; the rest of the
+    // codebase does not expect the long-path prefix.
     const long_path_prefix = std.unicode.utf8ToUtf16LeStringLiteral("\\\\?\\");
     if (std.mem.startsWith(u16, path, long_path_prefix)) {
         path = path[long_path_prefix.len..];
