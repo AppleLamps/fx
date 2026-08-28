@@ -2,6 +2,12 @@
 
 Status: proposal. No implementation in this document.
 
+> **Phase 1 is complete.** `fx.exe` builds and links for `x86_64-windows`
+> with POSIX behavior measured unchanged. See
+> [`windows-port-phase1.md`](windows-port-phase1.md) — including the open
+> Windows security item (`verifies_confidentiality` is false) and the note
+> that the binary has not yet been run on a real Windows host.
+>
 > **Phase 0 has since been run.** See
 > [`windows-port-phase0.md`](windows-port-phase0.md) for the real compiler
 > output: 30 errors across 5 clusters. It confirms findings 1, 2, and 3,
