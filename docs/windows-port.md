@@ -164,7 +164,8 @@ credential-manager backend.
 **Degraded but acceptable in v1.** Windows takes the approval path for every
 command. `command_effect.plan` already returns
 `.approval_required = .unsupported_platform` for non-macOS/Linux targets
-(`src/core/shell_command/command_effect.zig:313`) and `direct_command.zig:197`
+(`src/core/shell_command/command_effect.zig:313`) and
+`src/core/permissions/direct_command.zig:198`
 returns `error.UnsupportedDirectPlatform` to match. That is safe and correct,
 just slower — **porting the direct read-only pipeline is not required to ship
 a working Windows product.** This is a significant scope cut worth taking.
@@ -202,10 +203,21 @@ The core of the port. Replace pgid-based tree control with **Job Objects** —
 `CreateJobObject` + `AssignProcessToJobObject` +
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` — which is the correct analogue of the
 existing `kill(-pid, ...)` group termination in `direct_command.zig:731` and
-`process_tree.zig`. Behind the `background_process_provider` vtable: spawn,
-timeout, terminate, stdio piping, exit-status mapping. Add a PowerShell shell
-strategy to `shell_resolver.zig`, which currently understands only bash and zsh
-and hard-codes absolute POSIX paths (`shell_resolver.zig:19-34`).
+`process_tree.zig`. Behind a process contract: spawn, timeout, terminate,
+stdio piping, exit-status mapping. Add a PowerShell shell
+strategy to `src/core/terminal/shell_resolver.zig`, which currently understands
+only bash and zsh and hard-codes absolute POSIX paths (`shell_resolver.zig:19-34`).
+
+**The provider vtable alone is not enough.** `background_process_provider` has
+exactly one call site in `command_runner.zig` — line 603, inside
+`spawnPreparedBackground` (`:592`). The foreground path never touches it:
+`executeCommand` (`:540`) and `executeCommandInEnvironment` (`:556`) reach the
+`executeProcess*` and `executeRawBash` family (`:1000`-`:1553`) directly. Since
+v1 ships foreground approved commands and defers background ones, implementing
+Job Objects behind that vtable alone would leave *everything v1 actually uses*
+on the POSIX path. Extend the existing contract to cover foreground execution,
+or introduce a shared process contract both paths call — do not add a third
+independent path.
 
 Keep `command_effect` on the approval path throughout.
 
@@ -228,9 +240,22 @@ Exit: interactive sessions, resize, and recovery.
 
 ### Phase 5 — CI and release
 
-Add `x86_64-windows` to the cross-compile matrix in `release.yml` (Zig
-cross-compiles, so building is cheap). Add a `windows-latest` runner to
-`full-ci.yml` running `zig build test` only.
+Add `x86_64-windows` to the cross-compile matrix in `release.yml`. Zig
+cross-compiles, so *building* is cheap — but packaging is not a matrix entry
+away. The package step hard-codes the POSIX artifact
+(`cp zig-out/bin/fx …` then `tar -czf`, `release.yml:68-74`), and a Windows
+target emits `zig-out/bin/fx.exe`. Following this phase literally fails at
+packaging and never uploads a Windows artifact. Windows needs its own binary
+name, archive format (`.zip`, not `.tar.gz`), and checksum wiring into the
+release job.
+
+Add a `windows-latest` runner to `full-ci.yml`. It must **build and smoke-test
+the binary**, not just run `zig build test`: the existing native jobs run
+`fx help` and `fx status --json` and assert non-empty stdout with empty stderr
+(`full-ci.yml:59-75`). Unit tests alone never launch the product, so Windows
+startup, console initialization, and stray-stderr regressions would all pass
+the gate. The Windows job should exercise the same noninteractive happy path
+against the freshly built `fx.exe`.
 
 **The E2E suite cannot run on Windows as written.** It is Bun + tmux with
 `FX_REQUIRE_TMUX: "1"` (`full-ci.yml:113`), and the shard runner resets a tmux
@@ -262,7 +287,7 @@ then add the Windows implementation.
 - **Which shell is the Windows default?** PowerShell 7 (`pwsh`) is the better
   target but is not preinstalled; Windows PowerShell 5.1 is universal but
   differs materially. `cmd.exe` is the most predictable to quote for and the
-  worst to use. This decision shapes `shell_resolver.zig` and the command
+  worst to use. This decision shapes `src/core/terminal/shell_resolver.zig` and the command
   classifier in `command_effect.zig`.
 - **Is MSYS/Git-Bash a supported configuration or an accident?**
   `workspace_files.zig:262` already looks for `C:\Program Files\Git`.
