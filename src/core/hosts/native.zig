@@ -262,6 +262,7 @@ test "native clipboard selects the platform command" {
 }
 
 test "native clipboard accepts only a successful exit" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     try std.testing.expect(copySucceeded(.{ .exited = 0 }));
     try std.testing.expect(!copySucceeded(.{ .exited = 1 }));
     try std.testing.expect(!copySucceeded(.{ .signal = .TERM }));

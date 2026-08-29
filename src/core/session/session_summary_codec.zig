@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const file_permissions = @import("../shared/file_permissions.zig");
 const io_mod = @import("../shared/io.zig");
 const session = @import("session.zig");
@@ -2265,6 +2266,7 @@ test "deferred cache token rejects malformed and noncanonical input" {
 }
 
 test "deferred cache token reader rejects non-private files" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

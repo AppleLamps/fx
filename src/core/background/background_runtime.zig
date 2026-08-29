@@ -23,6 +23,7 @@ const task_helpers = @import("../tasks/task_helpers.zig");
 const Allocator = std.mem.Allocator;
 
 test {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     _ = background_launch_identity;
     _ = background_launch_output;
     _ = background_record_liveness;

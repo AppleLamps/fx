@@ -7655,6 +7655,7 @@ test "workspace rebind honors an immediate latest cache lock deadline" {
 }
 
 test "same-workspace append defers latest cache contention and marks cache dirty" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -8954,6 +8955,7 @@ test "bounded doctor inspection stops at valid session limit" {
 }
 
 test "doctor reports unsafe managed child artifacts" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -12527,6 +12529,7 @@ test "empty home read only operations create nothing" {
 }
 
 test "missing home is empty for reads and bootstrapped privately for writes" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -12609,6 +12612,7 @@ test "first write traces and maps shared layout failure" {
 }
 
 test "first write creates only the private session layout" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

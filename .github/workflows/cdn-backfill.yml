@@ -21,7 +21,13 @@ permissions:
 
 env:
   CDN_BASE: cli
-  PLATFORMS: linux-x86_64 linux-aarch64 macos-x86_64 macos-aarch64
+  # platform:archive-extension. Windows ships a .zip; the rest ship .tar.gz.
+  PLATFORMS: >-
+    linux-x86_64:tar.gz
+    linux-aarch64:tar.gz
+    macos-x86_64:tar.gz
+    macos-aarch64:tar.gz
+    windows-x86_64:zip
 
 jobs:
   backfill:
@@ -100,22 +106,34 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --dir "$TMPDIR" \
               --pattern "fx-*.tar.gz" \
-              --pattern "fx-*.tar.gz.sha256" 2>/dev/null || {
+              --pattern "fx-*.tar.gz.sha256" \
+              --pattern "fx-*.zip" \
+              --pattern "fx-*.zip.sha256" 2>/dev/null || {
               echo "  no assets found, skipping"
               SKIPPED=$((SKIPPED + 1))
               rm -rf "$TMPDIR"
               continue
             }
 
-            for PLATFORM in $PLATFORMS; do
-              TARBALL="fx-${PLATFORM}.tar.gz"
-              CHECKSUM="${TARBALL}.sha256"
+            for ENTRY in $PLATFORMS; do
+              PLATFORM="${ENTRY%%:*}"
+              EXT="${ENTRY##*:}"
+              ARCHIVE="fx-${PLATFORM}.${EXT}"
+              CHECKSUM="${ARCHIVE}.sha256"
 
-              if [ -f "$TMPDIR/$TARBALL" ]; then
-                upload_blob "$TMPDIR/$TARBALL" "${CDN_BASE}/${VERSION}/${TARBALL}" "application/gzip" && \
+              case "$EXT" in
+                tar.gz) ARCHIVE_TYPE="application/gzip" ;;
+                zip)    ARCHIVE_TYPE="application/zip" ;;
+                *)      ARCHIVE_TYPE="application/octet-stream" ;;
+              esac
+
+              # Releases predating a platform simply have no asset for it, which
+              # is a skip and not a failure.
+              if [ -f "$TMPDIR/$ARCHIVE" ]; then
+                upload_blob "$TMPDIR/$ARCHIVE" "${CDN_BASE}/${VERSION}/${ARCHIVE}" "$ARCHIVE_TYPE" && \
                   UPLOADED=$((UPLOADED + 1)) || FAILED=$((FAILED + 1))
               else
-                echo "  missing $TARBALL"
+                echo "  missing $ARCHIVE"
                 SKIPPED=$((SKIPPED + 1))
               fi
 

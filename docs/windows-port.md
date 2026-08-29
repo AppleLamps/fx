@@ -1,10 +1,19 @@
 # Windows platform port — scope, sequencing, and phase plan
 
-Status: phases 0 through 3 are implemented, and phase 4's foundation is; see
-the phase reports linked below. Phases 2, 3, and 4 are not verified end to end.
-This document remains the plan of record for the scope and sequencing; the code
-lives in the tree.
+Status: phases 0 through 3 are implemented, phase 4 landed its foundation only,
+and phase 5 has landed; see the phase reports linked below. Phases 2, 3, and 4
+are not verified end to end. This document remains the plan of record for the
+scope and sequencing; the code lives in the tree.
 
+> **Phase 5 landed CI and release, and found the gap the earlier phases left.**
+> Windows is now cross-compiled on every pull request, built and smoke-tested on
+> a real `windows-latest` runner, and released as a signed-nothing
+> `fx-windows-x86_64.zip`. It also established that "Windows compiles" only ever
+> covered the *product*: `zig build test -Dtarget=x86_64-windows` failed with 72
+> errors, now reduced to 8 in unported subsystems. Those 8 are the entry
+> criterion for a Windows unit-test job. See
+> [`windows-port-phase5.md`](windows-port-phase5.md).
+>
 > **Phase 4 landed its foundation only.** `windows_pty.zig` binds ConPTY —
 > absent from Zig's std entirely — and spawns a child attached to a
 > pseudoconsole through `STARTUPINFOEX`, which `std.process.spawn` cannot do.
@@ -333,6 +342,13 @@ against the freshly built `fx.exe`.
 `FX_REQUIRE_TMUX: "1"` (`.github/workflows/full-ci.yml:113`), and the shard runner resets a tmux
 server between files (`.github/workflows/full-ci.yml:213-216`). A Windows E2E harness is its own
 project and should not gate v1.
+
+**Landed**, with the packaging trap above confirmed and handled, plus one thing
+this plan did not anticipate: the Windows *test* binary had never been compiled,
+and does not compile. The `windows-latest` job therefore builds and smoke-tests
+but does not run `zig build test`. The cross-compile gate went into
+`.github/workflows/ci.yml` as well, so it runs per pull request rather than only
+on release. See [`windows-port-phase5.md`](windows-port-phase5.md).
 
 ---
 

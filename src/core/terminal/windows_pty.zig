@@ -54,6 +54,16 @@ const Allocator = std.mem.Allocator;
 
 const supported = builtin.os.tag == .windows;
 
+// `callconv(pty_callconv)` lowers per target architecture: `win64` on x86_64, and
+// `aarch64_aapcs_win` on ARM64 — which the LLVM backend rejects outside a
+// Windows target. This module stays in the test registry so its pure-logic
+// tests (quoting, COORD bounds, the STARTUPINFOEXW ABI) run everywhere, and
+// building those tests for aarch64-linux is enough to force the calling
+// convention through semantic analysis even though nothing here is ever
+// called off Windows. Off-Windows the convention is therefore only required
+// to be *a* valid one; on Windows it is `.winapi` exactly as before.
+const pty_callconv: std.builtin.CallingConvention = if (supported) .winapi else .c;
+
 const Error = error{
     PseudoConsoleUnavailable,
     PseudoConsoleCreateFailed,
@@ -99,26 +109,26 @@ const PROCESS_INFORMATION = extern struct {
 
 extern "kernel32" fn GetModuleHandleW(
     lpModuleName: ?windows.LPCWSTR,
-) callconv(.winapi) ?windows.HMODULE;
+) callconv(pty_callconv) ?windows.HMODULE;
 
 extern "kernel32" fn GetProcAddress(
     hModule: windows.HMODULE,
     lpProcName: [*:0]const u8,
-) callconv(.winapi) ?*anyopaque;
+) callconv(pty_callconv) ?*anyopaque;
 
 extern "kernel32" fn CreatePipe(
     hReadPipe: *windows.HANDLE,
     hWritePipe: *windows.HANDLE,
     lpPipeAttributes: ?*windows.SECURITY_ATTRIBUTES,
     nSize: windows.DWORD,
-) callconv(.winapi) windows.BOOL;
+) callconv(pty_callconv) windows.BOOL;
 
 extern "kernel32" fn InitializeProcThreadAttributeList(
     lpAttributeList: ?*anyopaque,
     dwAttributeCount: windows.DWORD,
     dwFlags: windows.DWORD,
     lpSize: *usize,
-) callconv(.winapi) windows.BOOL;
+) callconv(pty_callconv) windows.BOOL;
 
 extern "kernel32" fn UpdateProcThreadAttribute(
     lpAttributeList: *anyopaque,
@@ -128,11 +138,11 @@ extern "kernel32" fn UpdateProcThreadAttribute(
     cbSize: usize,
     lpPreviousValue: ?*anyopaque,
     lpReturnSize: ?*usize,
-) callconv(.winapi) windows.BOOL;
+) callconv(pty_callconv) windows.BOOL;
 
 extern "kernel32" fn DeleteProcThreadAttributeList(
     lpAttributeList: *anyopaque,
-) callconv(.winapi) void;
+) callconv(pty_callconv) void;
 
 extern "kernel32" fn CreateProcessW(
     lpApplicationName: ?windows.LPCWSTR,
@@ -145,14 +155,14 @@ extern "kernel32" fn CreateProcessW(
     lpCurrentDirectory: ?windows.LPCWSTR,
     lpStartupInfo: *windows.STARTUPINFOW,
     lpProcessInformation: *PROCESS_INFORMATION,
-) callconv(.winapi) windows.BOOL;
+) callconv(pty_callconv) windows.BOOL;
 
-extern "kernel32" fn ResumeThread(hThread: windows.HANDLE) callconv(.winapi) windows.DWORD;
+extern "kernel32" fn ResumeThread(hThread: windows.HANDLE) callconv(pty_callconv) windows.DWORD;
 
 extern "kernel32" fn TerminateProcess(
     hProcess: windows.HANDLE,
     uExitCode: windows.UINT,
-) callconv(.winapi) windows.BOOL;
+) callconv(pty_callconv) windows.BOOL;
 
 const CreatePseudoConsoleFn = *const fn (
     windows.COORD,
@@ -160,10 +170,10 @@ const CreatePseudoConsoleFn = *const fn (
     windows.HANDLE,
     windows.DWORD,
     *HPCON,
-) callconv(.winapi) HRESULT;
+) callconv(pty_callconv) HRESULT;
 
-const ResizePseudoConsoleFn = *const fn (HPCON, windows.COORD) callconv(.winapi) HRESULT;
-const ClosePseudoConsoleFn = *const fn (HPCON) callconv(.winapi) void;
+const ResizePseudoConsoleFn = *const fn (HPCON, windows.COORD) callconv(pty_callconv) HRESULT;
+const ClosePseudoConsoleFn = *const fn (HPCON) callconv(pty_callconv) void;
 
 /// The three ConPTY entry points, resolved together or not at all.
 const Procs = struct {

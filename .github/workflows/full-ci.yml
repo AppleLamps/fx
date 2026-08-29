@@ -73,6 +73,56 @@ jobs:
           test -s "$status_stdout"
           test ! -s "$status_stderr"
 
+  native-windows:
+    name: Native checks (ReleaseSafe, windows-x86_64)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      AI_GATEWAY_API_KEY: ""
+      VERCEL_OIDC_TOKEN: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: "0.16.0"
+          cache-key: full-ci-native-windows-x86_64-ReleaseSafe
+
+      - name: Check formatting
+        run: zig fmt --check src/
+
+      - name: Build
+        run: zig build -Doptimize=ReleaseSafe
+
+      # The unit suite is deliberately absent. `zig build test` does not yet
+      # compile for Windows: six POSIX-only declarations in subsystems that are
+      # not ported yet (foreground-session signals, fork-based subagents, the
+      # native terminal session backend, tmux sessions) are analyzed by the test
+      # binary even though the product build never reaches them. Adding the step
+      # now would only pin CI red. `docs/windows-port-phase5.md` lists all six.
+      #
+      # What this job does cover is the gap unit tests would never close anyway:
+      # that the binary starts on real Windows. Every prior phase verified
+      # runtime behavior under wine, which does not implement sockets, advisory
+      # locks, or ConPTY data flow.
+      - name: Smoke test fresh binary
+        shell: bash
+        run: |
+          help_stdout="$(mktemp)"
+          help_stderr="$(mktemp)"
+          status_stdout="$(mktemp)"
+          status_stderr="$(mktemp)"
+          trap 'rm -f "$help_stdout" "$help_stderr" "$status_stdout" "$status_stderr"' EXIT
+
+          ./zig-out/bin/fx.exe help >"$help_stdout" 2>"$help_stderr"
+          test -s "$help_stdout"
+          test ! -s "$help_stderr"
+
+          ./zig-out/bin/fx.exe status --json >"$status_stdout" 2>"$status_stderr"
+          test -s "$status_stdout"
+          test ! -s "$status_stderr"
+
   e2e:
     name: E2E (${{ matrix.optimize }}, ${{ matrix.platform.name }}, shard ${{ matrix.shard.label }})
     runs-on: ${{ matrix.platform.runner }}

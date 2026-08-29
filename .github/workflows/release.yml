@@ -81,6 +81,43 @@ jobs:
             fx-${{ matrix.name }}.tar.gz
             fx-${{ matrix.name }}.tar.gz.sha256
 
+  build-windows:
+    needs: check-version
+    if: needs.check-version.outputs.needed == 'true'
+    name: Build windows-x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: "0.16.0"
+
+      - name: Build
+        run: zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-windows
+
+      # Windows ships a .zip, not a .tar.gz: Windows has no bundled tar that
+      # handles gzip in every supported shell, and the binary is fx.exe. The
+      # artifact is unsigned: Authenticode signing needs a cert this repo
+      # does not hold, so SmartScreen will warn on first run.
+      - name: Package
+        run: |
+          package_dir="$RUNNER_TEMP/fx-package-windows-x86_64"
+          mkdir -p "$package_dir"
+          cp zig-out/bin/fx.exe LICENSE THIRD_PARTY_NOTICES.md "$package_dir/"
+          archive="$GITHUB_WORKSPACE/fx-windows-x86_64.zip"
+          (cd "$package_dir" && zip -q -X "$archive" fx.exe LICENSE THIRD_PARTY_NOTICES.md)
+          sha256sum fx-windows-x86_64.zip > fx-windows-x86_64.zip.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fx-windows-x86_64
+          path: |
+            fx-windows-x86_64.zip
+            fx-windows-x86_64.zip.sha256
+
   build-macos-x86_64:
     needs: check-version
     if: needs.check-version.outputs.needed == 'true'
@@ -134,7 +171,7 @@ jobs:
       package_release: true
 
   release:
-    needs: [check-version, build-linux, build-macos-x86_64, build-macos-arm64]
+    needs: [check-version, build-linux, build-windows, build-macos-x86_64, build-macos-arm64]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -175,6 +212,8 @@ jobs:
           files: |
             fx-*.tar.gz
             fx-*.tar.gz.sha256
+            fx-*.zip
+            fx-*.zip.sha256
 
       - name: Publish to CDN
         env:
@@ -185,11 +224,14 @@ jobs:
           [[ "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           CDN_BASE="cli"
 
-          for FILE in fx-*.tar.gz fx-*.tar.gz.sha256; do
+          for FILE in fx-*.tar.gz fx-*.tar.gz.sha256 fx-*.zip fx-*.zip.sha256; do
             [ -f "$FILE" ] || continue
-            CONTENT_TYPE="application/octet-stream"
-            [[ "$FILE" == *.sha256 ]] && CONTENT_TYPE="text/plain"
-            [[ "$FILE" == *.tar.gz ]] && [[ "$FILE" != *.sha256 ]] && CONTENT_TYPE="application/gzip"
+            case "$FILE" in
+              *.sha256) CONTENT_TYPE="text/plain" ;;
+              *.tar.gz) CONTENT_TYPE="application/gzip" ;;
+              *.zip)    CONTENT_TYPE="application/zip" ;;
+              *)        CONTENT_TYPE="application/octet-stream" ;;
+            esac
 
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
               -X PUT "https://blob.vercel-storage.com/${CDN_BASE}/${VERSION}/${FILE}" \

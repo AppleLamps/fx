@@ -693,6 +693,7 @@ test "Linux proc helpers treat missing process data as vanished" {
 }
 
 test "process-group exclusion preserves the captured command grace" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     try std.testing.expect(shouldSignalProcess(41, null));
     try std.testing.expect(!shouldSignalProcess(41, 41));
     try std.testing.expect(shouldSignalProcess(42, 41));
@@ -715,6 +716,7 @@ test "stale process identities cannot become traversal roots" {
 }
 
 test "child admission binds the observed process to its expected parent" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const snapshot = ProcessSnapshot{
         .identity = .{ .linux_start_ticks = 42 },
         .parent_pid = 17,
@@ -739,6 +741,7 @@ test "macOS lineage identity matches only the same unique process" {
 }
 
 test "checked signal delivery distinguishes vanished stale and failed targets" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const FakeEffects = struct {
         fn capture(_: Allocator, pid: std.posix.pid_t) !ProcessSnapshot {
             return switch (pid) {
@@ -792,6 +795,7 @@ test "checked signal delivery distinguishes vanished stale and failed targets" {
 }
 
 test "checked signal delivery keeps vanished stale and excluded targets complete" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const FakeEffects = struct {
         fn capture(_: Allocator, pid: std.posix.pid_t) !ProcessSnapshot {
             if (pid == 21) return error.ProcessNotFound;

@@ -1390,6 +1390,7 @@ fn readExactRange(
 }
 
 test "command replay capture spills without losing callback order" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var capture_arena = std.heap.ArenaAllocator.init(alloc);
     defer capture_arena.deinit();
