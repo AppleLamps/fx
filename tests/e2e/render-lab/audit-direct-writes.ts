@@ -66,6 +66,8 @@ const allowlist: AllowRule[] = [
   rule("src/acp/jsonrpc.zig", ".+", /stdio_(?:acquisition|write)/, "acp_protocol_transport", "ACP JSON-RPC transport"),
   rule("src/core/execution/command_runner.zig", "(?:runForegroundSessionBootstrap|writeForegroundSessionReplaceFailure)", /stdio_acquisition_write/, "subprocess_protocol_transport", "foreground command bootstrap protocol"),
   rule("src/core/terminal/native_session.zig", "(?:acceptMarker|runLauncher)", /fixed_descriptor/, "subprocess_protocol_transport", "private native launcher PTY and control descriptors"),
+  rule("src/pty_probe.zig", "main", /debug_print/, "terminal_probe", "standalone ConPTY probe progress output"),
+  rule("src/fx_drive.zig", "main", /debug_print/, "terminal_probe", "standalone interactive drive probe progress output"),
   rule("src/core/terminal/tmux_session.zig", "runLauncher", /fixed_descriptor/, "subprocess_protocol_transport", "private tmux launcher PTY descriptor"),
   rule("src/core/terminal/client.zig", "(?:runFixture|writeFixtureJson)", /stdio_acquisition_write/, "tests", "private terminal client fixture output"),
   rule("src/terminal_client_fixture.zig", "(?:writeCompletionJson|writeJson)", /stdio_acquisition_write/, "tests", "private test-fixture output"),
