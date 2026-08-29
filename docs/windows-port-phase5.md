@@ -120,6 +120,46 @@ the `full-suite` aggregator, which requires each platform to have a native job
 `FX_REQUIRE_TMUX: "1"`, and the shard runner resets a tmux server between files.
 A Windows E2E harness is its own project.
 
+### What the new gate caught immediately
+
+The `linux-aarch64` native job failed on this phase's own branch, in
+`windows_pty.zig`:
+
+```
+error: calling convention 'aarch64_aapcs_win' not supported by
+       compiler backend 'stage2_llvm'
+```
+
+`callconv(.winapi)` lowers per architecture — `win64` on x86_64, and
+`aarch64_aapcs_win` on ARM64, which the LLVM backend rejects outside a Windows
+target. The module sits in the test registry so its pure-logic tests run
+everywhere, and building those tests for aarch64 is enough to force the
+convention through semantic analysis even though nothing in the file is ever
+called off Windows.
+
+This was **not introduced by phase 5**. It reproduces identically on the base
+commit with no phase 5 changes, which is how it was classified before anything
+was touched. Phase 4 landed it, and the gate structure could not see it: the
+workflow that gates pull requests and main (`ci.yml`) builds tests only for
+x86_64, while the workflow that covers aarch64 (`full-ci.yml`) runs only on
+branches. x86_64 compiles the same code without complaint, so the break stayed
+invisible on the only architecture anything checked.
+
+The fix is one conditional: off Windows the convention only has to be *a* valid
+one, since these declarations are never called there; on Windows it is
+`.winapi` exactly as before. aarch64 now compiles, the Windows product build is
+unchanged, the Windows test residual is still exactly 8, and the module's 14
+tests still pass on x86_64.
+
+It is worth being plain about what this says for the phase: the first thing the
+new CI did was fail, on real code, for a reason no previous verification could
+have surfaced. Phases 0–4 were each verified by a build run by hand on one
+architecture. That is exactly the blind spot a matrix exists to cover.
+
+A residual gap stays open: `ci.yml` still builds tests only for x86_64, so main
+is not gated on aarch64 unit builds. `full-ci.yml` covers it on branches, which
+is why this was caught, but a direct push to main would not be checked.
+
 ## What release now does
 
 The plan predicted the packaging trap correctly. The package step hard-coded
