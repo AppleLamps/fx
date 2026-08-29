@@ -76,7 +76,8 @@ const foreground_session_replace_failure_prefix = "\x00FX_FOREGROUND_EXEC_FAILED
 const foreground_session_replace_failure_marker_bytes =
     foreground_session_replace_failure_prefix.len +
     foreground_session_failure_nonce_hex_bytes + 1;
-const foreground_session_force_signal = std.posix.SIG.USR1;
+const foreground_session_force_signal: std.posix.SIG =
+    if (builtin.os.tag == .windows) .ABRT else .USR1;
 const ForegroundSessionTerminationRequest = enum(std.c.sig_atomic_t) {
     none,
     graceful,
@@ -3982,6 +3983,7 @@ test "timeout source is distinct from cancellation" {
 }
 
 test "foreground force cleanup preserves the supervisor" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const mask = foregroundSupervisorSignalMask();
     try std.testing.expect(std.posix.sigismember(&mask, std.posix.SIG.TERM));
     try std.testing.expect(std.posix.sigismember(&mask, foreground_session_force_signal));

@@ -5,14 +5,19 @@ and phase 5 has landed; see the phase reports linked below. Phases 2, 3, and 4
 are not verified end to end. This document remains the plan of record for the
 scope and sequencing; the code lives in the tree.
 
+> **Phase 1 finalization has started on the test-suite gap.** The 14 compiler
+> errors reproduced on a real Windows x86_64 host have been removed, and the
+> ReleaseSafe test binary now compiles, links, and begins its 8,624-test run.
+> Runtime failures remain in Windows path, file, permission, settings, image,
+> and disabled-terminal fixtures, so the unit suite is not a Windows CI gate
+> yet. See [`windows-port-phase5.md`](windows-port-phase5.md) for the measured
+> checkpoint.
+>
 > **Phase 5 landed CI and release, and found the gap the earlier phases left.**
 > Windows is now cross-compiled on every pull request, built and smoke-tested on
 > a real `windows-latest` runner, and released as a signed-nothing
-> `fx-windows-x86_64.zip`. It also established that "Windows compiles" only ever
-> covered the *product*: `zig build test -Dtarget=x86_64-windows` failed with 72
-> errors, now reduced to 8 in unported subsystems. Those 8 are the entry
-> criterion for a Windows unit-test job. See
-> [`windows-port-phase5.md`](windows-port-phase5.md).
+> `fx-windows-x86_64.zip`. It established that "Windows compiles" originally
+> covered only the product, not the unit-test binary.
 >
 > **Phase 4 landed its foundation only.** `windows_pty.zig` binds ConPTY —
 > absent from Zig's std entirely — and spawns a child attached to a

@@ -1684,6 +1684,7 @@ fn cleanupSocketIfUnusedChecked(alloc: Allocator, socket: []const u8) !void {
 }
 
 fn privateSocketHasListener(socket: []const u8) !bool {
+    if (comptime builtin.os.tag == .windows) return error.TmuxUnavailable;
     if (socket.len >= @sizeOf(@FieldType(std.c.sockaddr.un, "path"))) {
         return error.InvalidTmuxSocketPath;
     }
@@ -2428,7 +2429,7 @@ test "tmux marker arrival deadlines follow authenticated phase transitions" {
 }
 
 test "tmux peer deadline bounds accept receive partial frames and cancellation" {
-    if (!supported()) return error.SkipZigTest;
+    if (comptime !supported()) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     const socket_path = try std.fmt.allocPrint(
         alloc,

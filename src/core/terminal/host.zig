@@ -1335,7 +1335,11 @@ fn writeIdentity(
     instance: []const u8,
 ) !void {
     var pid_buffer: [32]u8 = undefined;
-    const pid = try std.fmt.bufPrint(&pid_buffer, "{d}", .{std.c.getpid()});
+    const process_id: u64 = if (comptime builtin.os.tag == .windows)
+        std.os.windows.GetCurrentProcessId()
+    else
+        @intCast(std.c.getpid());
+    const pid = try std.fmt.bufPrint(&pid_buffer, "{d}", .{process_id});
     const process_token = try process_provider.captureToken(
         alloc,
         pid,

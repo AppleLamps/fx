@@ -28,20 +28,20 @@ supported surface.
 
 ### Compiler blockers
 
-- [ ] Capture the current `zig build test -Doptimize=ReleaseSafe` diagnostics
+- [x] Capture the current `zig build test -Doptimize=ReleaseSafe` diagnostics
       in an issue or checkpoint note and group them by owning subsystem.
-- [ ] Fix Windows handle and PID formatting so pointer-valued process handles
+- [x] Fix Windows handle and PID formatting so pointer-valued process handles
       never use integer format specifiers.
-- [ ] Gate or abstract `std.c.pollfd`, `std.c.POLL`, and POSIX polling in test
+- [x] Gate or abstract `std.c.pollfd`, `std.c.POLL`, and POSIX polling in test
       builds.
-- [ ] Gate or replace `waitpid` in background-runtime test declarations.
-- [ ] Replace unconditional `SIG.USR1` and `SIG.HUP` declarations with a typed
+- [x] Gate or replace `waitpid` in background-runtime test declarations.
+- [x] Replace unconditional `SIG.USR1` and `SIG.HUP` declarations with a typed
       platform-neutral signal or control-event contract.
-- [ ] Gate fork-based subagent test helpers on platforms that implement
+- [x] Gate fork-based subagent test helpers on platforms that implement
       `fork`, without hiding portable subagent logic from Windows tests.
-- [ ] Remove Windows test analysis of POSIX `kill`, negative process-group IDs,
+- [x] Remove Windows test analysis of POSIX `kill`, negative process-group IDs,
       and POSIX PID casts.
-- [ ] Gate or replace `fcntl` use in tmux test declarations.
+- [x] Gate or replace `fcntl` use in tmux test declarations.
 - [ ] Run `zig build test -Doptimize=ReleaseSafe` on Windows and address every
       remaining compiler or test failure.
 
@@ -49,14 +49,14 @@ supported surface.
 
 - [ ] Add `zig build test -Doptimize=ReleaseSafe` to the `native-windows` job
       in `.github/workflows/full-ci.yml`.
-- [ ] Remove the stale CI comment saying the Windows unit suite cannot compile.
+- [x] Remove the stale CI comment saying the Windows unit suite cannot compile.
 - [ ] Update `docs/windows-port.md` and `docs/windows-port-phase5.md` with the
       measured final result.
 
 ### Phase 1 acceptance
 
-- [ ] `zig fmt --check src/` passes on Windows.
-- [ ] `zig build -Doptimize=ReleaseSafe` passes on Windows.
+- [x] `zig fmt --check src/` passes on Windows.
+- [x] `zig build -Doptimize=ReleaseSafe` passes on Windows.
 - [ ] `zig build test -Doptimize=ReleaseSafe` passes on Windows.
 - [ ] The Windows Full CI job runs the unit suite and passes.
 

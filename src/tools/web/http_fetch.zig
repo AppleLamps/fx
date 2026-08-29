@@ -1240,7 +1240,7 @@ fn connectPinned(address: IpAddress, options: FetchOptions) !posix.fd_t {
             continue;
         },
         .INPROGRESS, .AGAIN, .ALREADY => {
-            try pollFd(fd, posix.POLL.OUT, options);
+            try pollFd(fd, poll_out, options);
             try checkSocketError(fd);
             return fd;
         },
@@ -1492,23 +1492,39 @@ fn DeadlineWriter(comptime buffer_len: usize) type {
 
 const PollError = posix.PollError || error{Interrupted};
 
+const PollDescriptor = if (builtin.os.tag == .windows) struct {
+    fd: posix.fd_t,
+    events: i16,
+    revents: i16,
+} else posix.pollfd;
+
+const poll_in: i16 = if (builtin.os.tag == .windows) 0x0001 else posix.POLL.IN;
+const poll_out: i16 = if (builtin.os.tag == .windows) 0x0004 else posix.POLL.OUT;
+const poll_err: i16 = if (builtin.os.tag == .windows) 0x0008 else posix.POLL.ERR;
+const poll_hup: i16 = if (builtin.os.tag == .windows) 0x0010 else posix.POLL.HUP;
+const poll_nval: i16 = if (builtin.os.tag == .windows) 0x0020 else posix.POLL.NVAL;
+
 const Poller = struct {
     ctx: ?*anyopaque,
-    poll_fn: *const fn (?*anyopaque, []posix.pollfd, i32) PollError!usize,
+    poll_fn: *const fn (?*anyopaque, []PollDescriptor, i32) PollError!usize,
 };
 
-fn pollDefault(_: ?*anyopaque, fds: []posix.pollfd, timeout_ms: i32) PollError!usize {
-    const fds_count = std.math.cast(posix.nfds_t, fds.len) orelse
-        return error.SystemResources;
-    const rc = posix.system.poll(fds.ptr, fds_count, timeout_ms);
-    return switch (posix.errno(rc)) {
-        .SUCCESS => @intCast(rc),
-        .INTR => error.Interrupted,
-        .NOMEM => error.SystemResources,
-        .NETDOWN => error.NetworkDown,
-        .FAULT, .INVAL => unreachable,
-        else => |err| posix.unexpectedErrno(err),
-    };
+fn pollDefault(_: ?*anyopaque, fds: []PollDescriptor, timeout_ms: i32) PollError!usize {
+    if (comptime builtin.os.tag == .windows) {
+        return error.NetworkDown;
+    } else {
+        const fds_count = std.math.cast(posix.nfds_t, fds.len) orelse
+            return error.SystemResources;
+        const rc = posix.system.poll(fds.ptr, fds_count, timeout_ms);
+        return switch (posix.errno(rc)) {
+            .SUCCESS => @intCast(rc),
+            .INTR => error.Interrupted,
+            .NOMEM => error.SystemResources,
+            .NETDOWN => error.NetworkDown,
+            .FAULT, .INVAL => unreachable,
+            else => |err| posix.unexpectedErrno(err),
+        };
+    }
 }
 
 const default_poller: Poller = .{
@@ -1588,7 +1604,7 @@ fn rawReadWith(
     syscall: ReadSyscall,
 ) !usize {
     while (true) {
-        try pollFdWith(fd, posix.POLL.IN, options, poller);
+        try pollFdWith(fd, poll_in, options, poller);
         switch (syscall.read_fn(syscall.ctx, fd, buf)) {
             .count => |count| return count,
             .failure => |err| switch (classifyReadErrno(err)) {
@@ -1609,12 +1625,12 @@ fn rawWriteAll(fd: posix.fd_t, bytes: []const u8, options: FetchOptions) !void {
 fn rawWriteAllWith(fd: posix.fd_t, bytes: []const u8, options: FetchOptions, poller: Poller) !void {
     var written: usize = 0;
     while (written < bytes.len) {
-        try pollFdWith(fd, posix.POLL.OUT, options, poller);
+        try pollFdWith(fd, poll_out, options, poller);
         const rc = std.c.send(
             fd,
             bytes[written..].ptr,
             bytes.len - written,
-            @intCast(posix.MSG.NOSIGNAL),
+            if (builtin.os.tag == .windows) 0 else @intCast(posix.MSG.NOSIGNAL),
         );
         const errno = posix.errno(rc);
         if (errno != .SUCCESS) switch (classifyWriteErrno(errno)) {
@@ -1636,7 +1652,7 @@ fn pollFd(fd: posix.fd_t, events: i16, options: FetchOptions) !void {
 
 fn pollFdWith(fd: posix.fd_t, events: i16, options: FetchOptions, poller: Poller) !void {
     while (true) {
-        var fds = [_]posix.pollfd{.{
+        var fds = [_]PollDescriptor{.{
             .fd = fd,
             .events = events,
             .revents = 0,
@@ -1658,11 +1674,14 @@ fn pollFdWith(fd: posix.fd_t, events: i16, options: FetchOptions, poller: Poller
 }
 
 fn classifyPollEvents(fd: posix.fd_t, events: i16, revents: i16) !void {
-    if ((revents & posix.POLL.NVAL) != 0) return error.InvalidDescriptor;
+    if ((revents & poll_nval) != 0) return error.InvalidDescriptor;
     if ((revents & events) != 0) return;
-    if (events == posix.POLL.IN and (revents & posix.POLL.HUP) != 0) return;
-    if ((revents & posix.POLL.ERR) != 0) return pollSocketError(fd);
-    if ((revents & posix.POLL.HUP) != 0) return error.UnexpectedClose;
+    if (events == poll_in and (revents & poll_hup) != 0) return;
+    if ((revents & poll_err) != 0) {
+        if (comptime builtin.os.tag == .windows) return error.NetworkDown;
+        return pollSocketError(fd);
+    }
+    if ((revents & poll_hup) != 0) return error.UnexpectedClose;
     return error.UnexpectedClose;
 }
 
@@ -2519,6 +2538,7 @@ fn pipeBackedTlsBoundaryReader(
 }
 
 test "web_fetch TLS boundary completes self delimited response without reading eof" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var transport_reader: PlainDeadlineReader = undefined;
     var boundary_reader: ScriptedTlsBoundaryReader = undefined;
@@ -2543,6 +2563,7 @@ test "web_fetch TLS boundary completes self delimited response without reading e
 }
 
 test "web_fetch TLS boundary accepts clean close delimited eof" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var transport_reader: PlainDeadlineReader = undefined;
     var boundary_reader: ScriptedTlsBoundaryReader = undefined;
@@ -2564,6 +2585,7 @@ test "web_fetch TLS boundary accepts clean close delimited eof" {
 }
 
 test "web_fetch TLS boundary unwraps truncated close delimited eof" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var transport_reader: PlainDeadlineReader = undefined;
     var boundary_reader: ScriptedTlsBoundaryReader = undefined;
@@ -2644,7 +2666,7 @@ test "web_fetch response parser ignores pending bytes beyond content length" {
 }
 
 test "web_fetch TLS encrypted transport buffers satisfy stdlib minimums" {
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     var reader: TlsDeadlineReader = undefined;
     reader.init(-1, .{});
     try std.testing.expect(reader.interface.buffer.len >= std.crypto.tls.Client.min_buffer_len);
@@ -2655,6 +2677,7 @@ test "web_fetch TLS encrypted transport buffers satisfy stdlib minimums" {
 }
 
 test "web_fetch TLS deadline reader fills internal buffer for zero length readVec" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     var fds: [2]std.c.fd_t = undefined;
     if (std.c.pipe(&fds) != 0) return error.PipeFailed;
     defer closeFd(fds[0]);
@@ -3373,7 +3396,7 @@ fn expectAndTraceTlsTruncation(
 }
 
 test "web_fetch transport traces stable stages and redact sensitive values" {
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -3485,7 +3508,7 @@ const ScriptedDialer = struct {
 };
 
 test "web_fetch admitted dialing preserves order and one shared deadline" {
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     var fds: [2]std.c.fd_t = undefined;
     if (std.c.pipe(&fds) != 0) return error.PipeFailed;
     defer closeFd(fds[1]);
@@ -3513,7 +3536,7 @@ test "web_fetch admitted dialing preserves order and one shared deadline" {
 }
 
 test "web_fetch admitted dialing stops on control and local resource failures" {
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const addresses = [_]IpAddress{
         try ip("93.184.216.34", 443),
         try ip("93.184.216.35", 443),
@@ -3606,7 +3629,7 @@ const ScriptedPoller = struct {
         return .{ .ctx = @ptrCast(self), .poll_fn = poll };
     }
 
-    fn poll(raw: ?*anyopaque, fds: []posix.pollfd, timeout_ms: i32) PollError!usize {
+    fn poll(raw: ?*anyopaque, fds: []PollDescriptor, timeout_ms: i32) PollError!usize {
         const self: *@This() = @ptrCast(@alignCast(raw.?));
         self.calls += 1;
         self.observed_events = fds[0].events;
@@ -3628,19 +3651,24 @@ const ScriptedPoller = struct {
     }
 };
 
+fn testDescriptor(value: usize) posix.fd_t {
+    if (comptime builtin.os.tag == .windows) return @ptrFromInt(value);
+    return @intCast(value);
+}
+
 test "web_fetch poll events preserve requested readiness and hangup semantics" {
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
-    try classifyPollEvents(-1, posix.POLL.IN, posix.POLL.IN | posix.POLL.HUP);
-    try classifyPollEvents(-1, posix.POLL.IN, posix.POLL.IN | posix.POLL.ERR);
-    try classifyPollEvents(-1, posix.POLL.OUT, posix.POLL.OUT | posix.POLL.HUP);
-    try classifyPollEvents(-1, posix.POLL.IN, posix.POLL.HUP);
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
+    try classifyPollEvents(-1, poll_in, poll_in | poll_hup);
+    try classifyPollEvents(-1, poll_in, poll_in | poll_err);
+    try classifyPollEvents(-1, poll_out, poll_out | poll_hup);
+    try classifyPollEvents(-1, poll_in, poll_hup);
     try std.testing.expectError(
         error.UnexpectedClose,
-        classifyPollEvents(-1, posix.POLL.OUT, posix.POLL.HUP),
+        classifyPollEvents(-1, poll_out, poll_hup),
     );
     try std.testing.expectError(
         error.InvalidDescriptor,
-        classifyPollEvents(-1, posix.POLL.IN, posix.POLL.NVAL),
+        classifyPollEvents(-1, poll_in, poll_nval),
     );
 
     var sockets: [2]std.c.fd_t = undefined;
@@ -3650,44 +3678,45 @@ test "web_fetch poll events preserve requested readiness and hangup semantics" {
     defer closeFd(sockets[1]);
     try std.testing.expectError(
         error.UnexpectedClose,
-        classifyPollEvents(sockets[0], posix.POLL.IN, posix.POLL.ERR),
+        classifyPollEvents(sockets[0], poll_in, poll_err),
     );
 }
 
 test "web_fetch injected poll failures and arguments remain exact" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     var interrupted = ScriptedPoller{
         .result = .interrupted_once,
-        .revents = posix.POLL.IN,
+        .revents = poll_in,
     };
     try pollFdWith(
-        42,
-        posix.POLL.IN,
+        testDescriptor(42),
+        poll_in,
         .{ .deadline = .{ .deadline_ms = monotonicMillis() + 1000 } },
         interrupted.poller(),
     );
     try std.testing.expectEqual(@as(usize, 2), interrupted.calls);
-    try std.testing.expectEqual(posix.POLL.IN, interrupted.observed_events);
+    try std.testing.expectEqual(poll_in, interrupted.observed_events);
 
     var resources = ScriptedPoller{ .result = .system_resources };
     try std.testing.expectError(error.SystemResources, pollFdWith(
-        42,
-        posix.POLL.IN,
+        testDescriptor(42),
+        poll_in,
         .{},
         resources.poller(),
     ));
     try std.testing.expectEqual(@as(usize, 1), resources.calls);
-    try std.testing.expectEqual(posix.POLL.IN, resources.observed_events);
+    try std.testing.expectEqual(poll_in, resources.observed_events);
     try std.testing.expectEqual(@as(i32, 1000), resources.observed_timeout_ms);
 
     var network_down = ScriptedPoller{ .result = .network_down };
     try std.testing.expectError(error.NetworkDown, pollFdWith(
-        42,
-        posix.POLL.OUT,
+        testDescriptor(42),
+        poll_out,
         .{},
         network_down.poller(),
     ));
     try std.testing.expectEqual(@as(usize, 1), network_down.calls);
-    try std.testing.expectEqual(posix.POLL.OUT, network_down.observed_events);
+    try std.testing.expectEqual(poll_out, network_down.observed_events);
 }
 
 fn noOpSignalHandler(_: posix.SIG) callconv(.c) void {}
@@ -3706,7 +3735,7 @@ const PollSignalStorm = struct {
 };
 
 test "web_fetch poll deadline is not extended by interrupted syscalls" {
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const action: posix.Sigaction = .{
         .handler = .{ .handler = noOpSignalHandler },
         .mask = posix.sigemptyset(),
@@ -3739,7 +3768,7 @@ test "web_fetch poll deadline is not extended by interrupted syscalls" {
 
     try std.testing.expectError(error.Timeout, pollFd(
         fds[0],
-        posix.POLL.IN,
+        poll_in,
         .{ .deadline = .{ .deadline_ms = deadline_ms } },
     ));
     const elapsed_ms = monotonicMillis() - started_ms;
@@ -3801,12 +3830,12 @@ const InterruptingRead = struct {
 
 test "web_fetch interrupted socket read rechecks cancellation before retry" {
     var cancel_flag: std.atomic.Value(bool) = .init(false);
-    var poller = ScriptedPoller{ .revents = posix.POLL.IN };
+    var poller = ScriptedPoller{ .revents = poll_in };
     var read = InterruptingRead{ .cancel_flag = &cancel_flag };
     var buf: [1]u8 = undefined;
 
     try std.testing.expectError(error.Canceled, rawReadWith(
-        42,
+        testDescriptor(42),
         &buf,
         .{ .cancel_flag = &cancel_flag },
         poller.poller(),
@@ -3817,6 +3846,7 @@ test "web_fetch interrupted socket read rechecks cancellation before retry" {
 }
 
 test "web_fetch deadline reader drains bytes after hangup and then returns eof" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     var fds: [2]std.c.fd_t = undefined;
     if (std.c.pipe(&fds) != 0) return error.PipeFailed;
     defer closeFd(fds[0]);
@@ -3842,6 +3872,7 @@ test "web_fetch deadline reader drains bytes after hangup and then returns eof" 
 }
 
 test "web_fetch deadline adapters retain invalid descriptor causes" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     var fds: [2]std.c.fd_t = undefined;
     if (std.c.pipe(&fds) != 0) return error.PipeFailed;
     closeFd(fds[0]);
@@ -3868,7 +3899,7 @@ test "web_fetch deadline adapters retain invalid descriptor causes" {
 }
 
 test "web_fetch closed peer write returns a cause without terminating process" {
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     var sockets: [2]std.c.fd_t = undefined;
     if (std.c.socketpair(posix.AF.UNIX, posix.SOCK.STREAM, 0, &sockets) != 0)
         return error.SocketPairFailed;
@@ -3877,7 +3908,7 @@ test "web_fetch closed peer write returns a cause without terminating process" {
         return error.SocketShutdownFailed;
     closeFd(sockets[1]);
 
-    var poller = ScriptedPoller{ .revents = posix.POLL.OUT | posix.POLL.HUP };
+    var poller = ScriptedPoller{ .revents = poll_out | poll_hup };
     rawWriteAllWith(
         sockets[0],
         "x",

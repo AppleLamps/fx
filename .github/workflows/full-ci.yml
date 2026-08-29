@@ -95,12 +95,11 @@ jobs:
       - name: Build
         run: zig build -Doptimize=ReleaseSafe
 
-      # The unit suite is deliberately absent. `zig build test` does not yet
-      # compile for Windows: six POSIX-only declarations in subsystems that are
-      # not ported yet (foreground-session signals, fork-based subagents, the
-      # native terminal session backend, tmux sessions) are analyzed by the test
-      # binary even though the product build never reaches them. Adding the step
-      # now would only pin CI red. `docs/windows-port-phase5.md` lists all six.
+      # The unit suite is deliberately absent. It now compiles and links on
+      # Windows, but Windows-native runtime failures remain in path, file,
+      # permission, settings, image, and disabled-terminal fixtures. Adding the
+      # step before those failures are resolved would pin CI red. The current
+      # measured checkpoint is in `docs/windows-port-phase5.md`.
       #
       # What this job does cover is the gap unit tests would never close anyway:
       # that the binary starts on real Windows. Every prior phase verified

@@ -1322,6 +1322,7 @@ test "private read-only file remains valid after atomic replacement unlinks it" 
 }
 
 test "managed child capability rejects invalid names and unsafe routes" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

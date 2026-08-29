@@ -3399,7 +3399,7 @@ const Session = struct {
             else => return err,
         };
         const child_pid = if (durable.record.pid) |value|
-            std.fmt.parseInt(std.posix.pid_t, value, 10) catch null
+            parseNativePid(value)
         else
             null;
         const child_token = if (durable.record.process_token) |value|
@@ -6309,13 +6309,28 @@ fn launchFailureCode(err: anyerror) contracts.StructuredErrorCode {
 }
 
 fn signalValue(signal: contracts.Signal) std.c.SIG {
-    return switch (signal) {
-        .hangup => std.c.SIG.HUP,
-        .interrupt => std.c.SIG.INT,
-        .quit => std.c.SIG.QUIT,
-        .terminate => std.c.SIG.TERM,
-        .kill => std.c.SIG.KILL,
-    };
+    if (comptime builtin.os.tag == .windows) {
+        return switch (signal) {
+            .interrupt => std.c.SIG.INT,
+            .terminate => std.c.SIG.TERM,
+            .hangup, .quit, .kill => std.c.SIG.ABRT,
+        };
+    } else {
+        return switch (signal) {
+            .hangup => std.c.SIG.HUP,
+            .interrupt => std.c.SIG.INT,
+            .quit => std.c.SIG.QUIT,
+            .terminate => std.c.SIG.TERM,
+            .kill => std.c.SIG.KILL,
+        };
+    }
+}
+
+fn parseNativePid(value: []const u8) ?std.posix.pid_t {
+    if (comptime builtin.os.tag == .windows) {
+        return null;
+    }
+    return std.fmt.parseInt(std.posix.pid_t, value, 10) catch null;
 }
 
 fn signalFromInt(value: u32) ?std.posix.SIG {
@@ -7396,7 +7411,7 @@ test "malformed raw fallback durably replaces an invalid checkpoint with corrupt
 }
 
 test "shutdownSessionsOnly signals live sessions and leaves them allocated" {
-    if (!isSupported()) return error.SkipZigTest;
+    if (comptime !isSupported()) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var fixture = try TestDurableFixture.init(alloc);
     defer fixture.deinit();
@@ -7455,7 +7470,7 @@ test "shutdownSessionsOnly signals live sessions and leaves them allocated" {
 }
 
 test "durable release and exit wait survive resident session removal" {
-    if (!isSupported()) return error.SkipZigTest;
+    if (comptime !isSupported()) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var fixture = try TestDurableFixture.init(alloc);
     defer fixture.deinit();
@@ -7539,7 +7554,7 @@ test "durable release and exit wait survive resident session removal" {
 }
 
 test "a referenced slot is never recycled out from under its holder" {
-    if (!isSupported()) return error.SkipZigTest;
+    if (comptime !isSupported()) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var fixture = try TestDurableFixture.init(alloc);
     defer fixture.deinit();

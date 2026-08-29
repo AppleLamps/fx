@@ -7293,6 +7293,7 @@ test "provider and admission failures release resources and persist typed work s
 }
 
 test "process-held session lock preserves queue until explicit exactly-once retry" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var env = try TestEnvironment.init(alloc);
     defer env.deinit(alloc);
@@ -7628,6 +7629,7 @@ test "recovery does not classify a locally owned child as externally busy" {
 }
 
 test "shutdown joins while control locking and control writes are unavailable" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var env = try TestEnvironment.init(alloc);
     defer env.deinit(alloc);

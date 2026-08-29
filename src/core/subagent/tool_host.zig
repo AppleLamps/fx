@@ -2620,7 +2620,9 @@ fn forkIdentityIssuer(
 }
 
 test "independent processes receive distinct authoritative operation identities" {
-    if (comptime !@hasDecl(std.c, "fork")) return error.SkipZigTest;
+    if (comptime builtin.os.tag == .windows or !@hasDecl(std.c, "fork")) {
+        return error.SkipZigTest;
+    }
     const alloc = std.testing.allocator;
     const root_id = "01J00000000000000000000000";
     var env = try TestEnvironment.init(alloc);

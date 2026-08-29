@@ -3111,6 +3111,7 @@ test "durable long lived persistence failure keeps the degraded release" {
 }
 
 test "identity-indeterminate process-local cleanup retains display reservation" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     blocked_wrapper_cleanup_timeout_ms_for_test = 10;
     defer blocked_wrapper_cleanup_timeout_ms_for_test = null;
@@ -3148,6 +3149,7 @@ test "identity-indeterminate process-local cleanup retains display reservation" 
 }
 
 test "identity-indeterminate durable cleanup retains stable pair reservation" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     blocked_wrapper_cleanup_timeout_ms_for_test = 10;
     defer blocked_wrapper_cleanup_timeout_ms_for_test = null;

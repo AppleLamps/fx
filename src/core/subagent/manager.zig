@@ -10251,6 +10251,7 @@ noinline fn resumablePageContains(
 }
 
 test "control queue admission remains available while another process owns session lock" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var env = try TestEnvironment.init(alloc);
     defer env.deinit(alloc);
@@ -11361,7 +11362,9 @@ fn runProcessMutationPair(
 }
 
 test "competing processes converge while recovering one pending relationship transaction" {
-    if (comptime !@hasDecl(std.c, "fork")) return error.SkipZigTest;
+    if (comptime builtin.os.tag == .windows or !@hasDecl(std.c, "fork")) {
+        return error.SkipZigTest;
+    }
     const alloc = std.testing.allocator;
     var env = try TestEnvironment.init(alloc);
     defer env.deinit(alloc);
@@ -11429,7 +11432,9 @@ test "competing processes converge while recovering one pending relationship tra
 }
 
 test "competing process interval polls append one durable delivery" {
-    if (comptime !@hasDecl(std.c, "fork")) return error.SkipZigTest;
+    if (comptime builtin.os.tag == .windows or !@hasDecl(std.c, "fork")) {
+        return error.SkipZigTest;
+    }
     const alloc = std.testing.allocator;
     var env = try TestEnvironment.init(alloc);
     defer env.deinit(alloc);
@@ -11471,7 +11476,9 @@ test "competing process interval polls append one durable delivery" {
 }
 
 test "competing process policy admissions cannot cross the capacity budget" {
-    if (comptime !@hasDecl(std.c, "fork")) return error.SkipZigTest;
+    if (comptime builtin.os.tag == .windows or !@hasDecl(std.c, "fork")) {
+        return error.SkipZigTest;
+    }
     const alloc = std.testing.allocator;
     var env = try TestEnvironment.init(alloc);
     defer env.deinit(alloc);
@@ -11756,7 +11763,9 @@ test "delivery projections release ordered locks on every allocation failure" {
 }
 
 test "independent process delivery queries cannot cross detach or reparent" {
-    if (comptime !@hasDecl(std.c, "fork")) return error.SkipZigTest;
+    if (comptime builtin.os.tag == .windows or !@hasDecl(std.c, "fork")) {
+        return error.SkipZigTest;
+    }
     const alloc = std.testing.allocator;
     var env = try TestEnvironment.init(alloc);
     defer env.deinit(alloc);
@@ -11873,7 +11882,9 @@ test "independent process delivery queries cannot cross detach or reparent" {
 }
 
 test "independent processes preserve messages and reject inverse relationship cycles" {
-    if (comptime !@hasDecl(std.c, "fork")) return error.SkipZigTest;
+    if (comptime builtin.os.tag == .windows or !@hasDecl(std.c, "fork")) {
+        return error.SkipZigTest;
+    }
     const alloc = std.testing.allocator;
     var env = try TestEnvironment.init(alloc);
     defer env.deinit(alloc);

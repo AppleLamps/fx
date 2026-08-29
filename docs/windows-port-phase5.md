@@ -1,9 +1,34 @@
 # Phase 5 — CI and release
 
-Status: Windows is now built, packaged, released, and smoke-tested by CI. The
-unit suite is **not** run on Windows, because it does not yet compile there.
-That gap is the phase's main finding, and it is measured rather than asserted:
-eight declarations, listed below, block it.
+Status: Windows is built, packaged, released, and smoke-tested by CI. Phase 1
+of `FINALIZE.md` has removed the known Windows compiler and linker blockers
+from the unit-test binary. The suite now starts on a real Windows host, but it
+does not pass yet, so it has not been added to the Windows CI job.
+
+## Finalization checkpoint — 2026-08-29
+
+The baseline command was `zig build test -Doptimize=ReleaseSafe` with Zig
+0.16.0 on Windows x86_64. It initially stopped at 14 compiler errors, grouped
+by owner:
+
+- process identity formatting: Windows handles were formatted or cast as
+  integer PIDs in terminal and test helpers;
+- polling: HTTP and tmux tests exposed `pollfd`, `POLL`, and POSIX socket
+  polling on Windows;
+- process lifecycle: background cleanup used `waitpid`, and subagent process
+  fixtures used `fork`;
+- signalling: foreground and terminal declarations selected `SIG.USR1`,
+  `SIG.HUP`, negative process-group IDs, and POSIX PID parsing;
+- tmux cleanup: a Windows test path analyzed POSIX `fcntl`.
+
+Those declarations now compile and link. The direct ReleaseSafe test binary
+entered its 8,624-test runtime, proving that the original semantic-analysis and
+linker barriers are gone. The remaining gate is runtime correctness. Current
+failures cluster around Windows path handling, image and local-file fixtures,
+permission preparation, settings persistence, and UI tests whose terminal
+capability is intentionally disabled until later finalization phases. These
+failures must be classified and fixed or narrowly gated before the Windows CI
+job can run the unit suite.
 
 ## Finding 10 — the product compiled for Windows; the test binary never did
 
@@ -17,7 +42,8 @@ it sits in a file the Windows build imports. A `test` block is different: the
 test binary references every test in the module, so every POSIX assumption a
 test makes is forced through semantic analysis for the target being built.
 
-Measured on `1fa8fc3`, both against `x86_64-windows`:
+The original phase 5 measurement on `1fa8fc3`, both against
+`x86_64-windows`, was:
 
 | build | result |
 | --- | --- |
@@ -28,7 +54,7 @@ So "Windows compiles" was true and remains true, but it was a narrower claim
 than it sounded. Nothing regressed; a second, larger surface had simply never
 been looked at.
 
-### What the 72 errors were
+### What the original 72 errors were
 
 Almost all of them were tests asserting POSIX semantics that have no Windows
 meaning — `stat.permissions.toMode() & 0o777` against a `Permissions` that is a
@@ -51,7 +77,7 @@ for `x86_64-windows` behind the guard.
 The guards cost POSIX nothing: on Linux and macOS the condition is comptime
 false and each test runs exactly as before.
 
-### The eight that remain
+### The eight that remained at the phase 5 checkpoint
 
 72 → 8. The residual is not more of the same, which is why it stops here:
 
@@ -76,11 +102,10 @@ result would be a runtime crash on Windows where there is currently a compile
 error. Trading a compile-time guarantee for an unchecked runtime one, in
 subsystems nobody has ported, is a bad trade in a phase about CI.
 
-So the eight stay, and they are useful where they are: they are a
-compiler-maintained inventory of what porting those subsystems must cover, and
-they will fail loudly the moment someone claims a subsystem is done.
-
-**Entry criterion for a Windows unit-test job: this list is empty.**
+At that checkpoint the eight stayed as a compiler-maintained inventory. The
+2026-08-29 finalization work has now cleared that compile-time inventory. A
+passing runtime suite is the remaining entry criterion for a Windows unit-test
+job.
 
 One case is worth singling out. `io.zig` has a table test that calls
 `process_io_for(.macos, …)` from any host, to check the Darwin `std.Io` wrapper
@@ -220,4 +245,5 @@ verified from:
 - Every advisory-lock write path — wine's `NtLockFile` returns
   `STATUS_NOT_IMPLEMENTED`.
 - `verifies_confidentiality` is still false; the DACL check is still owed.
-- The eight declarations above, and the unit suite they block.
+- The Windows unit-test runtime failures listed in the finalization checkpoint
+  above.
