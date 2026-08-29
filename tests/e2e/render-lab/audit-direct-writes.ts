@@ -13,6 +13,7 @@ type Category =
   | "benchmark_output"
   | "acp_protocol_transport"
   | "subprocess_protocol_transport"
+  | "stdio_provider"
   | "tests";
 
 type Site = {
@@ -38,6 +39,12 @@ type StdioProvenance = {
   handles: Set<string>;
 };
 
+// `classify` matches primitives with RegExp.test, which is a substring test.
+// `stdio_acquisition` is therefore a prefix match for `stdio_acquisition_write`,
+// so an unanchored acquisition rule silently also permits acquire-and-write on
+// one line. Rules added for the stdio seam anchor their primitives for that
+// reason; the older rules are left as they are, since some of them match a
+// family of primitives on purpose.
 const allowlist: AllowRule[] = [
   rule("src/ui/transcript/io.zig", "writeFrameBytes", /stdio_write/, "frame_commit", "normal interactive frame delivery"),
   rule("src/ui/transcript/runtime.zig", "<top-level>", /stdio_acquisition/, "interactive_terminal_owner", "stored interactive stdout handle"),
@@ -62,6 +69,8 @@ const allowlist: AllowRule[] = [
   rule("src/core/terminal/tmux_session.zig", "runLauncher", /fixed_descriptor/, "subprocess_protocol_transport", "private tmux launcher PTY descriptor"),
   rule("src/core/terminal/client.zig", "(?:runFixture|writeFixtureJson)", /stdio_acquisition_write/, "tests", "private terminal client fixture output"),
   rule("src/terminal_client_fixture.zig", "(?:writeCompletionJson|writeJson)", /stdio_acquisition_write/, "tests", "private test-fixture output"),
+  rule("src/core/shared/stdio.zig", "<top-level>", /^(?:fixed_descriptor|stdio_acquisition)$/, "stdio_provider", "comptime standard-stream constants"),
+  rule("src/core/shared/stdio.zig", "(?:stdin|stdout|stderr)", /^stdio_acquisition$/, "stdio_provider", "standard-stream handle accessors"),
   rule("src/core/shared/darwin_process_spawn.zig", "process_spawn_inheriting_fd", /fixed_descriptor/, "subprocess_protocol_transport", "child stdio and witness file-action mapping"),
   rule("src/core/app/app_entry_runtime.zig", "(?:writeRealStdout|writeRealStderr)", /stdio_acquisition_write/, "noninteractive_output", "post-terminal handoff or failure output"),
   rule("src/core/app/app_upgrade_runtime.zig", "writeStderrDefault", /stdio_acquisition_write/, "noninteractive_output", "post-terminal upgrade relaunch failure output"),
@@ -72,7 +81,7 @@ const allowlist: AllowRule[] = [
   rule("src/core/cli/cli_replay.zig", "(?:writeStdout|writeStderr)", /stdio_acquisition_write/, "noninteractive_output", "replay process output"),
   rule("src/core/cli/cli_surface.zig", "(?:writeRealStdout|writeRealStderr|writeFdAll)", /(?:stdio_acquisition_write|fixed_fd_write|raw_fd_write|delegated_fd_write)/, "noninteractive_output", "top-level CLI output"),
   rule("src/core/cli/cli_surface.zig", "(?:setupTerminalAvailableDefault|enable)", /fixed_descriptor/, "terminal_probe", "masked setup prompt TTY and raw-mode setup"),
-  rule("src/core/auth/login_flow.zig", "(?:canUseInteractiveTeamPicker|enable)", /fixed_descriptor/, "terminal_probe", "auth login team-picker TTY probe"),
+  rule("src/core/auth/login_flow.zig", "(?:canUseInteractiveTeamPicker|enable)", /^(?:fixed_descriptor|stdio_acquisition)$/, "terminal_probe", "auth login team-picker TTY probe"),
   rule("src/core/auth/login_flow.zig", "writeStdout", /stdio_acquisition_write/, "noninteractive_output", "CLI auth login output"),
   rule("src/core/auth/chatgpt_oauth.zig", "writeStdout", /stdio_acquisition_write/, "noninteractive_output", "Codex CLI login output"),
   rule("src/core/auth/grok_oauth.zig", "writeStdout", /stdio_acquisition_write/, "noninteractive_output", "Grok CLI login output"),
@@ -264,20 +273,30 @@ function scanFile(root: string, path: string): Site[] {
     }
     const functionName = activeFunction?.name ?? "<top-level>";
     const provenance = activeFunction?.provenance ?? topLevel;
-    const aliasedAcquisition = recordStdioProvenance(line, provenance, topLevel);
+    // A line that is entirely a comment is not a call site. Doc comments here
+    // quote stdio APIs in prose: `src/core/shared/stdio.zig` explains why
+    // `std.Io.File.stdout()` cannot fold at comptime on Windows, and matching
+    // that prose reports a write that does not exist. Brace depth is still
+    // taken from the raw line, so function attribution is unchanged.
+    const isCommentOnly = /^\s*\/\//.test(line);
+    const aliasedAcquisition = isCommentOnly
+      ? false
+      : recordStdioProvenance(line, provenance, topLevel);
     const isStdioAcquirer = (name: string) =>
       hasVisibleName(provenance.acquirers, topLevel.acquirers, name);
     const isStdioHandle = (name: string) =>
       hasVisibleName(provenance.handles, topLevel.handles, name);
 
-    const primitive = detectPrimitive(
-      path,
-      line,
-      functionName,
-      isStdioAcquirer,
-      isStdioHandle,
-      aliasedAcquisition,
-    );
+    const primitive = isCommentOnly
+      ? null
+      : detectPrimitive(
+          path,
+          line,
+          functionName,
+          isStdioAcquirer,
+          isStdioHandle,
+          aliasedAcquisition,
+        );
     if (primitive) {
       sites.push({
         path,
