@@ -4263,6 +4263,9 @@ pub const TranscriptRuntime = struct {
         var result: TranscriptRuntime = .{
             .full_transcript_projection_cache = undefined,
             .compact_transcript_source_cache = undefined,
+            // Resolved at runtime: the comptime default is an invalid-handle
+            // placeholder on Windows.
+            .stdout_file = stdio.stdoutFile(),
         };
         for (&result.full_transcript_projection_cache.review.entries) |*entry| {
             entry.* = null;

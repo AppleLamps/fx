@@ -4,6 +4,16 @@ const types = @import("../../core/shared/types.zig");
 
 pub const interactive_mode_enable_sequence = "\x1b[>4;2m\x1b[>1u\x1b[?2004h\x1b[?7l";
 const tmux_interactive_mode_enable_sequence = "\x1b[>4;2m\x1b[?2004h\x1b[?7l";
+// Windows hosts get the win32-input-mode request instead of the Kitty
+// keyboard request: probe-measured conhost reports every key event as
+// `ESC[VK;Scan;Char;KeyDown;State;Repeat_`, which keeps Ctrl+Enter
+// distinguishable from Enter. Bracketed paste and autowrap match the POSIX
+// sequence; there is no Kitty protocol to negotiate.
+pub const windows_interactive_mode_enable_sequence = "\x1b[?2004h\x1b[?7l\x1b[?9001h";
+pub const win32_input_mode_disable_sequence = if (builtin.os.tag == .windows)
+    "\x1b[?9001l"
+else
+    "";
 pub const theme_notification_enable_sequence = "\x1b[?2031h";
 pub const theme_notification_disable_sequence = "\x1b[?2031l";
 pub const theme_color_scheme_query = "\x1b[?996n";
@@ -28,6 +38,7 @@ pub fn alternateScreenFrameRestoreSequence(mouse_tracking_active: bool) []const 
 }
 
 pub fn interactiveModeEnableSequence(tmux: ?[]const u8) []const u8 {
+    if (comptime builtin.os.tag == .windows) return windows_interactive_mode_enable_sequence;
     return if (tmux == null)
         interactive_mode_enable_sequence
     else
@@ -118,13 +129,23 @@ test "alternate screen frame restore leaves the cursor hidden for repaint" {
 }
 
 test "interactive mode preserves direct terminal keyboard protocols" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     try std.testing.expectEqualStrings(
         interactive_mode_enable_sequence,
         interactiveModeEnableSequence(null),
     );
 }
 
+test "windows interactive mode requests win32-input-mode" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
+    const sequence = interactiveModeEnableSequence(null);
+    try std.testing.expect(std.mem.find(u8, sequence, "\x1b[?9001h") != null);
+    try std.testing.expect(std.mem.find(u8, sequence, "\x1b[>1u") == null);
+    try std.testing.expect(std.mem.find(u8, sequence, "\x1b[?2004h") != null);
+}
+
 test "interactive mode leaves kitty keyboard negotiation to tmux" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const sequence = interactiveModeEnableSequence("");
 
     try std.testing.expectEqualStrings(
@@ -138,6 +159,7 @@ test "interactive mode leaves kitty keyboard negotiation to tmux" {
 }
 
 test "interactive mode leaves native terminal scrollback enabled" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     for ([_]?[]const u8{ null, "" }) |tmux| {
         const sequence = interactiveModeEnableSequence(tmux);
         try std.testing.expect(std.mem.find(u8, sequence, "\x1b[?1000h") == null);

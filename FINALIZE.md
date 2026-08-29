@@ -92,8 +92,11 @@ session in Windows Terminal, PowerShell, and a standard console host.
       main fx view.
 - [ ] Verify cursor visibility, bracketed paste behavior, Unicode width, color,
       alternate-screen ownership, and terminal title restoration.
-- [ ] Remove the unconditional Windows `NotATerminal` return only after the
-      Windows terminal state implementation is active.
+- [x] Remove the unconditional Windows `NotATerminal` return only after the
+      Windows terminal state implementation is active. The interactive
+      `TerminalState` seam is active (`windows_console.zig`); the interactive
+      UI starts, renders, and accepts input. `terminalSupportForOs(.windows)`
+      stays `.unsupported` until the remaining items land.
 - [ ] Change `terminalSupportForOs(.windows)` to `.supported` only after all
       Phase 2 tests pass.
 
@@ -103,17 +106,25 @@ session in Windows Terminal, PowerShell, and a standard console host.
       resize bounds, handle cleanup, and containment failures.
 - [ ] Add a Windows-native test that starts a shell, writes a command, reads its
       output, resizes the terminal, and closes the session.
-- [ ] Add an interactive smoke test that launches the fresh binary, submits one
-      local deterministic interaction, and exits cleanly.
-- [ ] Verify stderr is clean and no child process remains after exit.
+- [x] Add an interactive smoke test that launches the fresh binary, submits one
+      local deterministic interaction, and exits cleanly. `src/fx_drive.zig`
+      drives `zig-out/bin/fx.exe` under ConPTY: startup render, composer
+      typing, win32-input-mode key events, Ctrl+C, clean teardown. VERDICT:
+      PASS on the real host.
+- [x] Verify stderr is clean and no child process remains after exit. The
+      drive probe joins the reader, collects the child, and reports no leaked
+      processes; fx wrote no stderr besides its rendered output.
 
 ### Phase 2 acceptance
 
-- [ ] Running `./zig-out/bin/fx.exe` opens the interactive UI on Windows.
-- [ ] A user can enter, edit, submit, and cancel input.
+- [x] Running `./zig-out/bin/fx.exe` opens the interactive UI on Windows.
+- [ ] A user can enter, edit, submit, and cancel input. Entry, navigation,
+      Escape, and Ctrl+C are verified programmatically; paste and multiline
+      editing are the remaining phase 3 items.
 - [ ] A hosted PowerShell session supports read, write, resize, and close.
 - [ ] Exiting restores cursor, title, screen buffer, input modes, and terminal
-      dimensions.
+      dimensions. Console-mode restore and the 9001 disable sequence are
+      wired; full visual restoration needs the resize/takeover items.
 
 ## Phase 3: Implement Windows console input and raw mode
 
@@ -123,17 +134,30 @@ without POSIX termios.
 ### Console mode abstraction
 
 - [ ] Define a platform-neutral console input contract shared by CLI masked
-      input and the interactive composer.
-- [ ] Implement Windows mode capture with `GetConsoleMode`.
-- [ ] Implement mode changes with `SetConsoleMode`, preserving unrelated input
-      and output flags.
+      input and the interactive composer. The composer side now runs on
+      `windows_console.zig`; masked API-key entry and team selection still use
+      their own declined Windows paths.
+- [x] Implement Windows mode capture with `GetConsoleMode`. Both handles,
+      in `windows_console.captureOriginalModes`.
+- [x] Implement mode changes with `SetConsoleMode`, preserving unrelated input
+      and output flags. Output keeps every original flag and adds VT
+      processing; input deliberately replaces the cooked-input flags with the
+      VT-input byte model (the raw-mode analogue).
 - [ ] Restore original modes on normal exit, error exit, cancellation, and
-      process-level cleanup.
+      process-level cleanup. Normal and teardown paths restore via
+      `disableRawMode`; Windows has no POSIX signals, so the abnormal-exit
+      signal path needs its platform seam.
 - [ ] Handle redirected stdin and stdout without assuming console handles.
+      `ensureInteractive` still declines non-consoles; interactive and
+      redirected paths remain correctly separated.
 - [ ] Support UTF-16 console input and convert it safely to fx's UTF-8 text
-      model.
-- [ ] Map Windows key events to existing composer actions, including arrows,
+      model. win32-input-mode reports carry UTF-16 code units; the decoder
+      currently maps ASCII printable events and ignores non-ASCII for now.
+- [x] Map Windows key events to existing composer actions, including arrows,
       navigation, deletion, Enter, Ctrl+Enter, Ctrl+C, Ctrl+O, and Ctrl+X.
+      The `escape_parser.zig` win32-input-mode decoder maps the measured
+      conhost encodings onto fx's existing action space; eight tests pin
+      the wire bytes. Paste remains open below.
 - [ ] Implement paste handling without duplicating or truncating multiline
       content.
 

@@ -10,6 +10,14 @@ const frame_layout = @import("render_engine/frame_layout.zig");
 const cursor_probe = @import("terminal/cursor_probe.zig");
 const resize_runtime = @import("resize_runtime.zig");
 const ui_terminal = @import("terminal/terminal.zig");
+const windows_console = if (builtin.os.tag == .windows)
+    @import("terminal/windows_console.zig")
+else
+    struct {};
+const WindowsConsoleModes = if (builtin.os.tag == .windows)
+    windows_console.ConsoleModes
+else
+    struct {};
 const wasm_terminal = if (builtin.os.tag == .wasi) @import("terminal/wasm_terminal.zig") else struct {};
 
 const Allocator = std.mem.Allocator;
@@ -72,6 +80,9 @@ pub const AlternateScreenOwner = enum {
 pub const TerminalState = struct {
     stdin_fd: std.posix.fd_t = stdio.default_stdin,
     original_termios: std.posix.termios = undefined,
+    // Windows console modes saved by `captureOriginalTermios`; unused on
+    // other platforms.
+    console_modes: WindowsConsoleModes = .{},
     raw_enabled: bool = false,
     alternate_screen_owner: AlternateScreenOwner = .none,
     alternate_frame_layout: frame_layout.CommittedLayoutSnapshot = .{},
@@ -101,23 +112,32 @@ pub const TerminalState = struct {
 
     pub fn ensureInteractive(self: TerminalState) !void {
         if (comptime builtin.os.tag == .wasi) return;
-        if (comptime builtin.os.tag == .windows) return error.NotATerminal;
+        if (comptime builtin.os.tag == .windows) {
+            return windows_console.ensureInteractive();
+        }
         if (std.c.isatty(self.stdin_fd) == 0 or std.c.isatty(std.posix.STDOUT_FILENO) == 0) {
             return error.NotATerminal;
         }
     }
 
     pub fn captureOriginalTermios(self: *TerminalState) !void {
-        // termios has no Windows counterpart; console raw mode arrives with
-        // the ConPTY backend in phase 4.
-        if (comptime builtin.os.tag == .windows) return error.NotATerminal;
+        if (comptime builtin.os.tag == .windows) {
+            // termios has no Windows counterpart; the console modes are the
+            // equivalent save/restore state (probe-verified byte model).
+            self.console_modes = try windows_console.captureOriginalModes();
+            return;
+        }
 
         if (comptime builtin.os.tag == .wasi) return;
         self.original_termios = try std.posix.tcgetattr(self.stdin_fd);
     }
 
     pub fn enableRawMode(self: *TerminalState) !void {
-        if (comptime builtin.os.tag == .windows) return error.NotATerminal;
+        if (comptime builtin.os.tag == .windows) {
+            try windows_console.enableRawMode(self.console_modes);
+            self.raw_enabled = true;
+            return;
+        }
         if (comptime builtin.os.tag == .wasi) {
             self.raw_enabled = true;
             return;
@@ -152,7 +172,11 @@ pub const TerminalState = struct {
     }
 
     pub fn disableRawMode(self: *TerminalState) void {
-        if (comptime builtin.os.tag == .windows) return;
+        if (comptime builtin.os.tag == .windows) {
+            windows_console.restoreModes(self.console_modes);
+            self.raw_enabled = false;
+            return;
+        }
         if (!self.raw_enabled) return;
         if (comptime builtin.os.tag != .wasi) {
             std.posix.tcsetattr(self.stdin_fd, .FLUSH, self.original_termios) catch {};
@@ -184,6 +208,9 @@ pub const TerminalState = struct {
     }
 
     pub fn queryLayout(self: TerminalState, footer_rows: u16) !Layout {
+        if (comptime builtin.os.tag == .windows) {
+            return windows_console.queryLayout(footer_rows);
+        }
         return if (comptime builtin.os.tag == .wasi)
             wasm_terminal.queryLayout(footer_rows)
         else
@@ -275,9 +302,13 @@ pub const TerminalState = struct {
     }
 
     pub fn pollInput(self: TerminalState, timeout_ms: i32) !PollResult {
-        // `poll` is POSIX-only and `std.c.pollfd` does not exist for Windows.
-        // The interactive event loop arrives with the ConPTY backend in phase 4.
-        if (comptime builtin.os.tag == .windows) return error.NotATerminal;
+        if (comptime builtin.os.tag == .windows) {
+            return switch (windows_console.pollConsoleInput(timeout_ms)) {
+                .readable => .{ .readable = true },
+                .timeout => .{},
+                .failed => .{ .has_error = true },
+            };
+        }
         if (comptime builtin.os.tag == .wasi) {
             return switch (wasm_terminal.pollInput(timeout_ms)) {
                 1 => .{ .readable = true },
