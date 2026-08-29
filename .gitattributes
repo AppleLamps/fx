@@ -1,0 +1,17 @@
+# Normalize the working tree to LF everywhere, including Windows checkouts.
+#
+# GitHub's Windows runners default to core.autocrlf=true, so without this a
+# Windows checkout rewrites every file to CRLF. `zig fmt --check` compares
+# against LF-normalized output and reports all 565 .zig files as unformatted,
+# which is exactly how the windows-x86_64 CI job first failed. The same thing
+# happens to any contributor cloning on Windows.
+#
+# The repository is LF throughout already, so this changes no committed bytes;
+# it only fixes what lands in the working tree.
+* text=auto eol=lf
+
+# Byte-exact fixtures and assets: never transform these.
+*.gz  binary
+*.png binary
+*.m4a binary
+*.caf binary
