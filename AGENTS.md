@@ -430,7 +430,14 @@ Do not create version tags manually. Do not change `build.zig.zon` version (it i
 
 ## Repository and License
 
-The canonical repository is `vercel-labs/fx` on GitHub. All URLs, links, and references to the repo must use `vercel-labs/fx` (not `vercel/fx`, `user/fx`, or any other org/owner). Licensed under Apache-2.0.
+This repository is the `AppleLamps/fx` Windows-focused fork of the upstream
+`vercel-labs/fx` project. Fork-owned URLs, release links, package metadata,
+HTTP identification, issue links, and contribution instructions must use
+`AppleLamps/fx`. Use `vercel-labs/fx` only when explicitly referring to the
+upstream project or when a test fixture intentionally exercises that repository.
+Do not rewrite intentional fork references back to upstream.
+
+The fork remains licensed under Apache-2.0.
 
 ## What Not To Do
 

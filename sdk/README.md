@@ -357,5 +357,5 @@ These are local development pages and are not publicly hosted links.
 
 Maintainer references:
 
-- [SDK contributor guide](https://github.com/vercel-labs/fx/blob/main/sdk/AGENTS.md)
-- [Native Node-API design and security model](https://github.com/vercel-labs/fx/blob/main/sdk/NAPI.md)
+- [SDK contributor guide](https://github.com/AppleLamps/fx/blob/main/sdk/AGENTS.md)
+- [Native Node-API design and security model](https://github.com/AppleLamps/fx/blob/main/sdk/NAPI.md)

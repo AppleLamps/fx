@@ -636,7 +636,7 @@ pub fn postGatewayCompletion(
         defer secret.zeroAndFree(alloc, auth_header);
 
         const extra_headers = [_]std.http.Header{
-            .{ .name = "HTTP-Referer", .value = "https://github.com/vercel-labs/fx" },
+            .{ .name = "HTTP-Referer", .value = "https://github.com/AppleLamps/fx" },
             .{ .name = "X-Title", .value = "fx" },
             .{ .name = "Accept", .value = "application/json" },
             .{ .name = "ai-gateway-protocol-version", .value = "0.0.1" },
@@ -1637,7 +1637,7 @@ fn gatewayExtraHeaders(
 ) []const std.http.Header {
     std.debug.assert(buf.len >= 9);
     var len: usize = 0;
-    buf[len] = .{ .name = "HTTP-Referer", .value = "https://github.com/vercel-labs/fx" };
+    buf[len] = .{ .name = "HTTP-Referer", .value = "https://github.com/AppleLamps/fx" };
     len += 1;
     buf[len] = .{ .name = "X-Title", .value = "fx" };
     len += 1;
@@ -7704,7 +7704,7 @@ test "gateway chat request sends fx user agent and attribution headers" {
 
     if (fixture.failure) |err| return err;
     try std.testing.expectEqualStrings(user_agent, fixture.capturedHeaderValue("user-agent").?);
-    try std.testing.expectEqualStrings("https://github.com/vercel-labs/fx", fixture.capturedHeaderValue("http-referer").?);
+    try std.testing.expectEqualStrings("https://github.com/AppleLamps/fx", fixture.capturedHeaderValue("http-referer").?);
     try std.testing.expectEqualStrings("fx", fixture.capturedHeaderValue("x-title").?);
     try std.testing.expectEqualStrings("session_wire_123", fixture.capturedHeaderValue("x-session-id").?);
     try std.testing.expectEqualStrings("session_wire_123", fixture.capturedHeaderValue("x-session-affinity").?);

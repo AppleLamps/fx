@@ -13,6 +13,13 @@
 
 fx is a coding agent harness and CLI written in Zig, optimized for research and embeddability as part of larger systems.
 
+This repository is the `AppleLamps/fx` Windows-focused fork of
+[`vercel-labs/fx`](https://github.com/vercel-labs/fx). The fork's goal is to
+bring fx to Windows while preserving cross-platform behavior where practical.
+Fork releases, issues, and Windows-port work are maintained at
+[`AppleLamps/fx`](https://github.com/AppleLamps/fx); the Vercel Labs repository
+remains the upstream project.
+
 It focuses on minimalism and performance across the board, from system prompt design to its tools, feature set, and 7.8 MiB binary.
 
 For end users, its CLI output style and form factor aim to be closer to a Unix shell than a heavy "IDE in the terminal" TUI.
@@ -152,7 +159,7 @@ Read the [fx documentation](https://fx.sh/docs).
 Building fx requires [Zig 0.16.0+](https://ziglang.org/download/):
 
 ```bash
-git clone https://github.com/vercel-labs/fx.git
+git clone https://github.com/AppleLamps/fx.git
 cd fx
 zig build -Doptimize=ReleaseSafe
 ./zig-out/bin/fx
