@@ -138,6 +138,11 @@ extern "kernel32" fn CreateProcessW(
 
 extern "kernel32" fn ResumeThread(hThread: windows.HANDLE) callconv(.winapi) windows.DWORD;
 
+extern "kernel32" fn TerminateProcess(
+    hProcess: windows.HANDLE,
+    uExitCode: windows.UINT,
+) callconv(.winapi) windows.BOOL;
+
 const CreatePseudoConsoleFn = *const fn (
     windows.COORD,
     windows.HANDLE,
@@ -241,7 +246,7 @@ pub const PseudoConsole = struct {
     /// Tells the child its window changed. The POSIX counterpart is
     /// `TIOCSWINSZ` plus `SIGWINCH`; ConPTY delivers both effects itself.
     pub fn resize(self: PseudoConsole, size: Size) Error!void {
-        if (comptime !supported) return error.PseudoConsoleResizeFailed;
+        if (comptime !supported) return error.PseudoConsoleUnavailable;
         const coord = try size.toCoord();
         if (self.procs.resize(self.handle, coord) != 0) return error.PseudoConsoleResizeFailed;
     }
@@ -258,19 +263,46 @@ pub const PseudoConsole = struct {
     }
 };
 
-/// A child attached to a pseudoconsole, contained by a Job Object.
+/// A child attached to a pseudoconsole, contained by a Job Object **when one
+/// could be established**.
+///
+/// `job` is optional on purpose. Creating or assigning a job can be refused —
+/// most plausibly by a restrictive outer job this process already sits in — and
+/// a pty that fails to open because containment was unavailable is a worse
+/// outcome than one that opens uncontained. `command_runner` made the same
+/// trade in phase 2. What follows from that is that `terminate` has two
+/// strengths, and the difference is not cosmetic: see below.
 pub const Child = struct {
     process: windows.HANDLE,
     thread: windows.HANDLE,
     id: u32,
+    /// Null when containment could not be established. Callers that need to
+    /// know whether termination will reach descendants must check it.
     job: ?windows_job.Job,
 
-    /// Takes down the whole tree, not just the leader: on Windows killing a
-    /// process leaves its children running and holding its pipes, which is the
-    /// deadlock phase 2 shipped and had to fix.
-    pub fn terminate(self: Child, exit_code: u32) void {
-        if (comptime !supported) return;
-        if (self.job) |job| job.terminate(exit_code) catch {};
+    /// Stops the child, as completely as its containment allows.
+    ///
+    /// **With a job**, this takes down the whole tree. That is the point of
+    /// the job: on Windows, killing a process leaves its children running and
+    /// still holding its pipes, which is exactly the deadlock phase 2 shipped
+    /// and had to fix.
+    ///
+    /// **Without one**, it falls back to `TerminateProcess` on the leader,
+    /// which leaves descendants alive — so a reader waiting on `output` for
+    /// EOF can still block behind a grandchild that inherited the write end.
+    /// Weaker than the job path, and much better than the no-op this used to
+    /// be when `job` was null: a caller asking to terminate got silence.
+    ///
+    /// Returns whether the whole tree was covered, so a caller that must not
+    /// block on EOF can tell the difference rather than assume it.
+    pub fn terminate(self: Child, exit_code: u32) bool {
+        if (comptime !supported) return false;
+        if (self.job) |job| {
+            job.terminate(exit_code) catch return false;
+            return true;
+        }
+        _ = TerminateProcess(self.process, exit_code);
+        return false;
     }
 
     pub fn close(self: *Child) void {
@@ -345,18 +377,24 @@ pub fn commandLineAlloc(alloc: Allocator, argv: []const []const u8) ![:0]u16 {
     return std.unicode.wtf8ToWtf16LeAllocZ(alloc, buf.items);
 }
 
-/// Starts `argv` attached to `pty`, contained by a fresh Job Object.
+/// Starts `argv` attached to `pty`, contained by a fresh Job Object when one
+/// can be established.
 ///
 /// The child is created suspended so the job assignment lands before its first
 /// instruction, then resumed. That ordering is the whole reason this spawn is
-/// hand-rolled rather than delegated.
+/// hand-rolled rather than delegated: `std.process.spawn` exposes no
+/// `CREATE_SUSPENDED`, so phase 2 could only assign a child that was already
+/// running, and anything it forked in that window escaped.
+///
+/// A job that cannot be created or assigned does not fail the spawn — see
+/// `Child` for why, and for what that costs `Child.terminate`.
 pub fn spawnAttached(
     alloc: Allocator,
     pty: PseudoConsole,
     argv: []const []const u8,
     cwd: ?[]const u8,
 ) !Child {
-    if (comptime !supported) return error.PseudoConsoleSpawnFailed;
+    if (comptime !supported) return error.PseudoConsoleUnavailable;
     if (argv.len == 0) return error.InvalidCommandArgument;
 
     const command_line = try commandLineAlloc(alloc, argv);
@@ -449,11 +487,24 @@ test "pseudoconsole support is advertised per platform" {
     try std.testing.expectEqual(builtin.os.tag == .windows, supported);
 }
 
-test "creating a pseudoconsole off Windows reports unavailable rather than trapping" {
+test "every entry point reports the same error for an unsupported platform" {
+    // These three used to disagree — `create` said unavailable while `resize`
+    // and `spawnAttached` reported runtime failures, which left a caller
+    // unable to tell "this platform has no pseudoconsole" from "the
+    // pseudoconsole broke". Platform gating is one answer.
     if (comptime supported) return error.SkipZigTest;
     try std.testing.expectError(
         error.PseudoConsoleUnavailable,
         PseudoConsole.create(.{ .columns = 80, .rows = 25 }),
+    );
+    const console: PseudoConsole = undefined;
+    try std.testing.expectError(
+        error.PseudoConsoleUnavailable,
+        console.resize(.{ .columns = 80, .rows = 25 }),
+    );
+    try std.testing.expectError(
+        error.PseudoConsoleUnavailable,
+        spawnAttached(std.testing.allocator, console, &.{"cmd.exe"}, null),
     );
 }
 
@@ -542,11 +593,16 @@ test "the PowerShell invocation from the shell resolver serializes intact" {
     );
 }
 
-test "spawning off Windows reports failure rather than trapping" {
+test "terminate reports whether it covered the whole tree" {
+    // The return value is the whole point: without a job, termination reaches
+    // the leader only, and a caller waiting on `output` for EOF can still
+    // block behind a grandchild holding the write end. False says so.
     if (comptime supported) return error.SkipZigTest;
-    const pty: PseudoConsole = undefined;
-    try std.testing.expectError(
-        error.PseudoConsoleSpawnFailed,
-        spawnAttached(std.testing.allocator, pty, &.{"cmd.exe"}, null),
-    );
+    const child: Child = .{
+        .process = undefined,
+        .thread = undefined,
+        .id = 0,
+        .job = null,
+    };
+    try std.testing.expect(!child.terminate(1));
 }

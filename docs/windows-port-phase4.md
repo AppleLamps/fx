@@ -85,7 +85,14 @@ draining the pipe.
   here: a shell path under `Program Files`, and the phase 2 PowerShell
   invocation whose `-Command` boundary must not blur.
 - **`spawnAttached`** — attribute list, `STARTUPINFOEX`, `CreateProcessW`, Job
-  Object, resume.
+  Object, resume. A job that cannot be created or assigned does not fail the
+  spawn: a pty that refuses to open because containment was unavailable is a
+  worse outcome than one that opens uncontained, and `command_runner` made the
+  same trade in phase 2. `Child.terminate` therefore has two strengths — with a
+  job it takes down the tree; without one it falls back to `TerminateProcess`
+  on the leader, which leaves descendants alive and can still strand a reader
+  waiting on `output` for EOF. It returns which of the two happened, so a
+  caller that must not block can tell rather than assume.
 - The ConPTY trio is resolved with `GetProcAddress` rather than linked. It
   arrived in Windows 10 1809; a static import would make an older Windows a
   process that cannot load, where a dynamic lookup is a clean
