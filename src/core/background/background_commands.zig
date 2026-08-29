@@ -565,7 +565,9 @@ test "background open preserves opened failed and unsupported output" {
         alloc,
         opener,
         url,
-        host.nativeForOs(.windows).url_open,
+        // `.freebsd` rather than `.windows`: Windows can open a URL as of
+        // phase 3, so it no longer stands in for a platform that cannot.
+        host.nativeForOs(.freebsd).url_open,
     );
     defer alloc.free(unsupported.text);
     try std.testing.expect(!unsupported.succeeded);
