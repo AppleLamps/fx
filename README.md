@@ -34,15 +34,63 @@ curl -fsSL https://fx.sh/setup.sh | bash
 
 ### Windows
 
-Windows builds are published as `fx-windows-x86_64.zip` on the
+There are two ways to run fx on Windows, and they behave very differently.
+
+#### Run the interactive TUI with WSL (recommended)
+
+Native Windows builds cannot start the interactive terminal UI. If you want the
+full fx experience, including the TUI, browser sign-in, and background
+processes, install fx inside WSL and run it there, the same as on Linux:
+
+```powershell
+# In PowerShell (Administrator). Installs WSL with Ubuntu, then restart Windows.
+wsl --install
+```
+
+Then inside the WSL terminal:
+
+```bash
+curl -fsSL https://fx.sh/setup.sh | bash
+exec $SHELL                     # or open a new terminal so fx is on PATH
+cd /mnt/c/Users/you/your_project # a Windows checkout, reachable under /mnt/<drive>/...
+fx
+```
+
+Sign in inside WSL with `fx login`, or configure an API key with `fx setup`.
+Windows files are reachable under `/mnt/<drive>/...`, but builds and git
+operations are noticeably slower there. For the best performance, clone
+repositories into the Linux filesystem (for example `~/projects`) and open them
+from there.
+
+#### Native Windows builds (noninteractive only)
+
+Native Windows binaries are published as `fx-windows-x86_64.zip` on the
 [releases page](https://github.com/AppleLamps/fx/releases), with a `.sha256`
 beside each. The installer above is POSIX-only and does not install them, so
-download and extract the archive yourself.
+download the archive, extract it, and add the directory containing `fx.exe` to
+your `PATH`:
 
-**Windows support is experimental and incomplete.** The interactive terminal UI
-is unsupported, background processes are unavailable, and browser sign-in
-(`fx login`) has no working callback listener yet. Treat these builds as a work
-in progress rather than a way to run fx day to day —
+```powershell
+Expand-Archive fx-windows-x86_64.zip -DestinationPath "$env:LOCALAPPDATA\fx\bin"
+[Environment]::SetEnvironmentVariable(
+  "Path",
+  [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:LOCALAPPDATA\fx\bin",
+  "User")
+```
+
+On a native Windows build:
+
+* `fx ask "..."` runs one noninteractive request and exits. `fx status --json`,
+  `fx doctor --json`, and other noninteractive commands work.
+* `fx login` has no working browser callback listener yet. Set the
+  `AI_GATEWAY_API_KEY` environment variable instead, then confirm with
+  `fx status --json`.
+* The interactive TUI and background processes are unsupported. Commands that
+  need a TTY, including bare `fx`, exit with
+  `fx requires an interactive terminal (TTY).`
+
+**Windows support is experimental and incomplete.** Treat native Windows builds
+as a work in progress rather than a way to run fx day to day —
 [`docs/windows-port.md`](docs/windows-port.md) tracks what is implemented and
 what is not.
 

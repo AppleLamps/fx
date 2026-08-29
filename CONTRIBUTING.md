@@ -35,6 +35,12 @@ zig build test
 zig build run
 ```
 
+On Windows, `zig build` produces `zig-out\bin\fx.exe`. Native Windows builds
+support noninteractive use only (`fx ask`, `fx status --json`, and similar);
+the interactive terminal UI does not start on Windows yet, so exercise
+interactive-session changes through WSL, Linux, or macOS. The tmux-based E2E
+suite under `tests/e2e/` also does not run on Windows.
+
 ## Verification Workflow
 
 Keep the local development loop focused: run the narrowest test that covers the changed path, build fx, and exercise the change using `./zig-out/bin/fx`. The installed `fx` on `PATH` is not valid development evidence.
