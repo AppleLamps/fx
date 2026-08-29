@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const file_permissions = @import("../shared/file_permissions.zig");
 const contracts = @import("contracts.zig");
 const monitor_core = @import("monitor.zig");
@@ -6813,6 +6814,7 @@ test "recovery authority classification isolates only definitive evidence" {
 }
 
 test "close recovery classification isolates only malformed durable evidence" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     for ([_]anyerror{
         error.InvalidCloseTransaction,
         error.StreamTooLong,
@@ -8072,6 +8074,7 @@ test "tmux recovery propagates execution scope allocation failure without durabl
 }
 
 test "tmux recovery propagates proof capability failure without durable loss" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var fixture = try TestStoreFixture.init(alloc, test_options());
     defer fixture.deinit();

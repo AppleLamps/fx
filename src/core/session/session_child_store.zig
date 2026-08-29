@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const file_permissions = @import("../shared/file_permissions.zig");
 const config_runtime = @import("../config/config_runtime.zig");
 const io_mod = @import("../shared/io.zig");
@@ -1596,6 +1597,7 @@ test "subagent control capability rejects a symlinked route" {
 }
 
 test "terminal capabilities are private route restricted and reject symlinks" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

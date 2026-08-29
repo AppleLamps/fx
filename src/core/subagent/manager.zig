@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const file_permissions = @import("../shared/file_permissions.zig");
 const approval_persistence = @import("approval_persistence.zig");
 const authority = @import("authority.zig");
@@ -10899,6 +10900,7 @@ test "concurrent control mutations preserve every queued message" {
 }
 
 test "concurrent inverse attaches cannot commit a relationship cycle" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var env = try TestEnvironment.init(alloc);
     defer env.deinit(alloc);

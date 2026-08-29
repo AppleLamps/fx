@@ -299,12 +299,19 @@ jobs:
         include:
           - name: linux-x86_64
             target: x86_64-linux
+            bin: fx
           - name: linux-aarch64
             target: aarch64-linux
+            bin: fx
           - name: macos-x86_64
             target: x86_64-macos
+            bin: fx
           - name: macos-aarch64
             target: aarch64-macos
+            bin: fx
+          - name: windows-x86_64
+            target: x86_64-windows
+            bin: fx.exe
     steps:
       - uses: actions/checkout@v4
 
@@ -319,7 +326,7 @@ jobs:
 
       - name: Report binary size
         run: |
-          bytes=$(stat -c%s zig-out/bin/fx)
+          bytes=$(stat -c%s "zig-out/bin/${{ matrix.bin }}")
           mib=$(awk -v b="$bytes" 'BEGIN { printf "%.2f", b / 1048576 }')
           echo "${{ matrix.name }}: $bytes bytes ($mib MiB)"
           echo "${{ matrix.name }}: $bytes bytes ($mib MiB)" >> "$GITHUB_STEP_SUMMARY"

@@ -1417,6 +1417,7 @@ test "Keychain migration sanitizes rejected entries after verified publication" 
 }
 
 test "credential store is private atomic and supports restart deletion" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

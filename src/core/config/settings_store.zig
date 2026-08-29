@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const file_permissions = @import("../shared/file_permissions.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
 const io_mod = @import("../shared/io.zig");
@@ -2216,6 +2217,7 @@ test "notification user patch preserves sibling fields and valid workspace overr
 }
 
 test "user patch snapshots and removes legacy workspace copies" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -2853,6 +2855,7 @@ test "multi-value user patch commits model effort and fast mode once" {
 }
 
 test "missing user settings is created through private durable commit" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -2872,6 +2875,7 @@ test "missing user settings is created through private durable commit" {
 }
 
 test "invalid primary is not replaced by backup or mutation" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -3013,6 +3017,7 @@ test "unrelated user patch preserves inert output level values" {
 }
 
 test "second settings commit creates a sequenced private backup" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -3095,6 +3100,7 @@ test "symlinked durable home is rejected before reading settings" {
 }
 
 test "read only settings rejects group or world writable policy files" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

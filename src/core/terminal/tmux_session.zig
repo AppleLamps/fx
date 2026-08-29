@@ -1608,6 +1608,7 @@ fn parseTmuxCursorBlinking(text: []const u8) !bool {
 }
 
 test "older tmux cursor formats use compatible defaults" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     try std.testing.expectEqual(
         contracts.CursorShape.block,
         try parseTmuxCursorShape(""),
@@ -2358,6 +2359,7 @@ fn writeAll(fd: std.posix.fd_t, bytes: []const u8) !void {
 extern "c" fn tcsetpgrp(fd: c_int, pgrp: std.posix.pid_t) c_int;
 
 test "tmux launcher wait status classifies terminal results before stops" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     try std.testing.expectEqual(
         std.process.Child.Term{ .exited = 23 },
         launcherStatusToTerm(23 << 8),

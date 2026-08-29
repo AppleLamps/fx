@@ -7504,6 +7504,7 @@ fn waitExternalExecutionProcess(pid: std.c.pid_t) !u8 {
 }
 
 test "recovery skips execution owned by another live process" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     if (comptime !@hasDecl(std.c, "fork")) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var env = try TestEnvironment.init(alloc);

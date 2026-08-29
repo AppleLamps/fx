@@ -269,6 +269,7 @@ fn isSupportedForOs(os_tag: std.Target.Os.Tag) bool {
 }
 
 test "native terminal backend selection follows canonical platform support" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const os_tags = [_]std.Target.Os.Tag{
         .macos,
         .linux,
@@ -592,6 +593,7 @@ fn launcherStatusToTerm(raw_status: u32) std.process.Child.Term {
 }
 
 test "launcher wait status classifies terminal results before stops" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     try std.testing.expectEqual(
         std.process.Child.Term{ .exited = 23 },
         launcherStatusToTerm(23 << 8),
@@ -5866,6 +5868,7 @@ fn openPty() !Pty {
 }
 
 test "PTY output drains use a nonblocking master" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     if (comptime !isSupported()) return;
     const pty = try openPty();
     defer closeFd(pty.master);
@@ -6423,6 +6426,7 @@ test "write payload encoding preserves text paste keys and controls" {
 }
 
 test "terminal outcomes preserve exact exit and signal status" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     try std.testing.expectEqual(
         contracts.ReturnOutcome{ .exited = 23 },
         outcomeFromTerm(.{ .exited = 23 }).?,

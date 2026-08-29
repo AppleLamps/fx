@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const agent_steps = @import("agent_steps.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
 const io_mod = @import("../shared/io.zig");
@@ -1827,6 +1828,7 @@ test "merged settings rejects symlinked durable root reload path" {
 }
 
 test "merged settings rejects writable user policy files" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
@@ -3432,6 +3434,7 @@ test "invalid user model emits typed diagnostic and project model is ignored" {
 }
 
 test "detailed settings report unsafe user permissions distinctly" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");

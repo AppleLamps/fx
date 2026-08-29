@@ -675,6 +675,7 @@ test "Darwin spawn reports launch errors and preserves wait and kill" {
 extern "c" fn getpgid(pid: std.posix.pid_t) std.posix.pid_t;
 
 test "Darwin spawn creates and joins a pipeline process group" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const io = try darwin_io();
     const alloc = std.testing.allocator;
     var producer = try std.process.spawn(io, .{

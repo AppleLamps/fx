@@ -2242,6 +2242,7 @@ fn freshChildState(
 }
 
 test "fresh child state persists its provider with the model" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var command = try domain.validateCommand(alloc, .{ .create = .{
         .name = "codex-child",
