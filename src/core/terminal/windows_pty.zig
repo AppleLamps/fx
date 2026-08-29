@@ -23,6 +23,12 @@
 //! takes one string, and the quoting rules that `CommandLineToArgvW` will
 //! reverse are specific enough to be worth testing directly.
 //!
+//! Containment is not optional here. If the Job Object cannot be created or
+//! assigned, the spawn fails and the still-suspended child is terminated,
+//! rather than returning a shell whose tree nothing could later take down.
+//! `command_runner` tolerates a missing job for a foreground command, which is
+//! short-lived and collected; an interactive shell is neither.
+//!
 //! Owning the spawn has one benefit worth naming. Phase 2 recorded an open
 //! race: `std.process.spawn` exposes no `CREATE_SUSPENDED`, so a child reached
 //! its Job Object a moment after it started running, and anything it forked in
@@ -46,13 +52,18 @@ const windows_job = @import("../execution/windows_job.zig");
 
 const Allocator = std.mem.Allocator;
 
-pub const supported = builtin.os.tag == .windows;
+const supported = builtin.os.tag == .windows;
 
-pub const Error = error{
+const Error = error{
     PseudoConsoleUnavailable,
     PseudoConsoleCreateFailed,
     PseudoConsoleResizeFailed,
     PseudoConsoleSpawnFailed,
+    /// The child started but could not be placed in a Job Object, so nothing
+    /// would have been able to take its tree down later. Distinct from a spawn
+    /// failure because the process did start; it is killed before this
+    /// returns.
+    PseudoConsoleContainmentFailed,
     InvalidPseudoConsoleSize,
 };
 
@@ -177,14 +188,14 @@ const Procs = struct {
 };
 
 /// A terminal size in cells.
-pub const Size = struct {
+const Size = struct {
     columns: u16,
     rows: u16,
 
     /// `COORD` is a pair of signed 16-bit values and a pseudoconsole with a
     /// zero dimension is rejected by Windows, so both bounds are checked here
     /// rather than left to produce an opaque `HRESULT`.
-    pub fn toCoord(self: Size) Error!windows.COORD {
+    fn toCoord(self: Size) Error!windows.COORD {
         if (self.columns == 0 or self.rows == 0) return error.InvalidPseudoConsoleSize;
         if (self.columns > std.math.maxInt(i16) or self.rows > std.math.maxInt(i16)) {
             return error.InvalidPseudoConsoleSize;
@@ -199,13 +210,13 @@ pub const Size = struct {
 /// the child drew. The other two ends belong to the pseudoconsole, which
 /// duplicates them at creation, so they are closed here immediately — holding
 /// them would keep `output` from ever reaching EOF.
-pub const PseudoConsole = struct {
+const PseudoConsole = struct {
     handle: HPCON,
     input: windows.HANDLE,
     output: windows.HANDLE,
     procs: Procs,
 
-    pub fn create(size: Size) Error!PseudoConsole {
+    fn create(size: Size) Error!PseudoConsole {
         if (comptime !supported) return error.PseudoConsoleUnavailable;
         const coord = try size.toCoord();
         const procs = try Procs.resolve();
@@ -245,7 +256,7 @@ pub const PseudoConsole = struct {
 
     /// Tells the child its window changed. The POSIX counterpart is
     /// `TIOCSWINSZ` plus `SIGWINCH`; ConPTY delivers both effects itself.
-    pub fn resize(self: PseudoConsole, size: Size) Error!void {
+    fn resize(self: PseudoConsole, size: Size) Error!void {
         if (comptime !supported) return error.PseudoConsoleUnavailable;
         const coord = try size.toCoord();
         if (self.procs.resize(self.handle, coord) != 0) return error.PseudoConsoleResizeFailed;
@@ -254,7 +265,7 @@ pub const PseudoConsole = struct {
     /// Closing the pseudoconsole is what tells a well-behaved child to exit,
     /// so this is the graceful stop. It also releases the duplicated pipe
     /// ends, which is what finally lets a reader on `output` see EOF.
-    pub fn close(self: *PseudoConsole) void {
+    fn close(self: *PseudoConsole) void {
         if (comptime !supported) return;
         self.procs.close(self.handle);
         windows.CloseHandle(self.input);
@@ -263,51 +274,40 @@ pub const PseudoConsole = struct {
     }
 };
 
-/// A child attached to a pseudoconsole, contained by a Job Object **when one
-/// could be established**.
+/// A child attached to a pseudoconsole, always contained by a Job Object.
 ///
-/// `job` is optional on purpose. Creating or assigning a job can be refused —
-/// most plausibly by a restrictive outer job this process already sits in — and
-/// a pty that fails to open because containment was unavailable is a worse
-/// outcome than one that opens uncontained. `command_runner` made the same
-/// trade in phase 2. What follows from that is that `terminate` has two
-/// strengths, and the difference is not cosmetic: see below.
-pub const Child = struct {
+/// `job` is not optional, and that is a deliberate reversal. The first version
+/// let containment fail softly, reasoning that a pty which refuses to open is
+/// worse than one that opens uncontained — the trade `command_runner` made in
+/// phase 2. That reasoning does not transfer. A foreground command is
+/// short-lived and collected; this is an interactive shell whose only teardown
+/// is the job, so an uncontained one leaks its whole tree on every timeout and
+/// cancellation, with nothing able to reach it afterwards.
+///
+/// The failure is also detectable at the one moment it costs nothing: the
+/// child is still suspended and has run no instruction, so refusing to
+/// continue leaves nothing behind. `spawnAttached` terminates it and fails.
+const Child = struct {
     process: windows.HANDLE,
     thread: windows.HANDLE,
     id: u32,
-    /// Null when containment could not be established. Callers that need to
-    /// know whether termination will reach descendants must check it.
-    job: ?windows_job.Job,
+    job: windows_job.Job,
 
-    /// Stops the child, as completely as its containment allows.
+    /// Takes down the whole tree, not just the leader.
     ///
-    /// **With a job**, this takes down the whole tree. That is the point of
-    /// the job: on Windows, killing a process leaves its children running and
-    /// still holding its pipes, which is exactly the deadlock phase 2 shipped
-    /// and had to fix.
-    ///
-    /// **Without one**, it falls back to `TerminateProcess` on the leader,
-    /// which leaves descendants alive — so a reader waiting on `output` for
-    /// EOF can still block behind a grandchild that inherited the write end.
-    /// Weaker than the job path, and much better than the no-op this used to
-    /// be when `job` was null: a caller asking to terminate got silence.
-    ///
-    /// Returns whether the whole tree was covered, so a caller that must not
-    /// block on EOF can tell the difference rather than assume it.
-    pub fn terminate(self: Child, exit_code: u32) bool {
-        if (comptime !supported) return false;
-        if (self.job) |job| {
-            job.terminate(exit_code) catch return false;
-            return true;
-        }
-        _ = TerminateProcess(self.process, exit_code);
-        return false;
+    /// That is the point of the job: on Windows, killing a process leaves its
+    /// children running and still holding its pipes, which is exactly the
+    /// deadlock phase 2 shipped and had to fix. Because containment is
+    /// established before this type exists, the guarantee holds for every
+    /// `Child`; there is no weaker path to fall back to.
+    fn terminate(self: Child, exit_code: u32) void {
+        if (comptime !supported) return;
+        self.job.terminate(exit_code) catch {};
     }
 
-    pub fn close(self: *Child) void {
+    fn close(self: *Child) void {
         if (comptime !supported) return;
-        if (self.job) |job| job.close();
+        self.job.close();
         windows.CloseHandle(self.thread);
         windows.CloseHandle(self.process);
         self.* = undefined;
@@ -321,7 +321,7 @@ pub const Child = struct {
 /// subtly wrong — and a terminal's first argument is a shell path that may
 /// contain spaces, with arguments after it that may contain quotes. Caller owns
 /// the result.
-pub fn commandLineAlloc(alloc: Allocator, argv: []const []const u8) ![:0]u16 {
+fn commandLineAlloc(alloc: Allocator, argv: []const []const u8) ![:0]u16 {
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
 
@@ -386,9 +386,10 @@ pub fn commandLineAlloc(alloc: Allocator, argv: []const []const u8) ![:0]u16 {
 /// `CREATE_SUSPENDED`, so phase 2 could only assign a child that was already
 /// running, and anything it forked in that window escaped.
 ///
-/// A job that cannot be created or assigned does not fail the spawn — see
-/// `Child` for why, and for what that costs `Child.terminate`.
-pub fn spawnAttached(
+/// A job that cannot be created or assigned **fails the spawn**: the still
+/// suspended child is terminated and an error returned, rather than handing
+/// back a tree nothing could later reach. See `Child`.
+fn spawnAttached(
     alloc: Allocator,
     pty: PseudoConsole,
     argv: []const []const u8,
@@ -459,19 +460,20 @@ pub fn spawnAttached(
     }
 
     // Assign before resuming: this is the window phase 2 could not close.
-    var job: ?windows_job.Job = windows_job.Job.create() catch null;
-    if (job) |created| {
-        created.assign(info.hProcess) catch {
-            created.close();
-            job = null;
-        };
-    }
+    // Nothing below tolerates a missing job. The child is still suspended, so
+    // failing here costs only a process that never ran an instruction.
+    const job = windows_job.Job.create() catch {
+        _ = TerminateProcess(info.hProcess, 1);
+        return error.PseudoConsoleContainmentFailed;
+    };
+    errdefer job.close();
+    job.assign(info.hProcess) catch {
+        _ = TerminateProcess(info.hProcess, 1);
+        return error.PseudoConsoleContainmentFailed;
+    };
 
     if (ResumeThread(info.hThread) == std.math.maxInt(windows.DWORD)) {
-        if (job) |created| {
-            created.terminate(1) catch {};
-            created.close();
-        }
+        job.terminate(1) catch {};
         return error.PseudoConsoleSpawnFailed;
     }
 
@@ -593,16 +595,11 @@ test "the PowerShell invocation from the shell resolver serializes intact" {
     );
 }
 
-test "terminate reports whether it covered the whole tree" {
-    // The return value is the whole point: without a job, termination reaches
-    // the leader only, and a caller waiting on `output` for EOF can still
-    // block behind a grandchild holding the write end. False says so.
-    if (comptime supported) return error.SkipZigTest;
-    const child: Child = .{
-        .process = undefined,
-        .thread = undefined,
-        .id = 0,
-        .job = null,
-    };
-    try std.testing.expect(!child.terminate(1));
+test "a child cannot exist without containment" {
+    // The type is the guarantee: `job` is not optional, so there is no way to
+    // hold a `Child` whose tree `terminate` cannot reach. This pins that
+    // against a future edit reintroducing the soft-failure path.
+    const job_field = @FieldType(Child, "job");
+    try std.testing.expectEqual(windows_job.Job, job_field);
+    try std.testing.expect(@typeInfo(job_field) != .optional);
 }

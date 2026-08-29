@@ -85,14 +85,27 @@ draining the pipe.
   here: a shell path under `Program Files`, and the phase 2 PowerShell
   invocation whose `-Command` boundary must not blur.
 - **`spawnAttached`** — attribute list, `STARTUPINFOEX`, `CreateProcessW`, Job
-  Object, resume. A job that cannot be created or assigned does not fail the
-  spawn: a pty that refuses to open because containment was unavailable is a
-  worse outcome than one that opens uncontained, and `command_runner` made the
-  same trade in phase 2. `Child.terminate` therefore has two strengths — with a
-  job it takes down the tree; without one it falls back to `TerminateProcess`
-  on the leader, which leaves descendants alive and can still strand a reader
-  waiting on `output` for EOF. It returns which of the two happened, so a
-  caller that must not block can tell rather than assume.
+  Object, resume. **Containment is mandatory:** a job that cannot be created or
+  assigned fails the spawn, and the still-suspended child is terminated. So
+  `Child.job` is not optional and `Child.terminate` always reaches the whole
+  tree.
+
+  That reverses the first version, which let containment fail softly on the
+  reasoning that a pty refusing to open is worse than one opening uncontained —
+  the trade `command_runner` made in phase 2. A reviewer pushed back and was
+  right: the reasoning does not transfer. A foreground command is short-lived
+  and collected; an interactive shell's only teardown *is* the job, so an
+  uncontained one leaks its whole tree on every timeout and cancellation with
+  nothing able to reach it afterwards. The failure is also detectable at the
+  one moment it costs nothing — the child is suspended and has run no
+  instruction — so refusing to continue leaves nothing behind.
+
+All declarations are private. `AGENTS.md` asks that `pub` be reserved for
+declarations used outside their file, and nothing imports this one yet; the PR
+that adds the session backend is the one that widens them. It does cost
+something worth naming: with the module private, the wine probe cannot import
+it, so that probe is built against a copy differing only in the `pub` keyword,
+which cannot change runtime behavior.
 - The ConPTY trio is resolved with `GetProcAddress` rather than linked. It
   arrived in Windows 10 1809; a static import would make an older Windows a
   process that cannot load, where a dynamic lookup is a clean
