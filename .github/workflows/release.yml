@@ -99,7 +99,7 @@ jobs:
 
       # Windows ships a .zip, not a .tar.gz: Windows has no bundled tar that
       # handles gzip in every supported shell, and the binary is fx.exe. The
-      # artifact is unsigned -- Authenticode signing needs a cert this repo
+      # artifact is unsigned: Authenticode signing needs a cert this repo
       # does not hold, so SmartScreen will warn on first run.
       - name: Package
         run: |

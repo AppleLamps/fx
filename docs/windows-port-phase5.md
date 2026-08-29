@@ -150,10 +150,21 @@ SmartScreen will warn on first run. This is a distribution decision, not a
 packaging one.
 
 **Nothing in this repository installs the artifact.** The CDN layout gained
-`.zip` and `.zip.sha256`, but the installer that consumes `latest.txt` lives
-outside this tree and still expects a `.tar.gz`. Publishing a Windows archive
-does not by itself make `fx` installable on Windows; whoever owns the installer
-has to handle the new shape.
+`.zip` and `.zip.sha256` — in `cdn-backfill.yml` as well as `release.yml`, since
+the recovery path would otherwise report success while leaving the Windows
+artifact permanently missing — but the installer that consumes `latest.txt`
+lives outside this tree and still expects a `.tar.gz`. Publishing a Windows
+archive does not by itself make `fx` installable on Windows; whoever owns the
+installer has to handle the new shape.
+
+So the README documents the archive rather than an install path: where it is,
+how to verify it, and that the interactive terminal UI, background processes,
+and browser sign-in are all unavailable. `AGENTS.md` requires user-facing
+changes to reach the README, and equally requires not documenting intended
+behavior as if it already existed; an "install fx on Windows" section would
+have done the second. Only verified negatives are stated —
+`terminalSupportForOs(.windows)` is `.unsupported` and `background_processes`
+is false for Windows in `nativeForOs`.
 
 ## Still open after phase 5
 

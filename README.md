@@ -25,6 +25,20 @@ It's open source (Apache-2.0), model-agnostic, and suitable for both local and c
 curl -fsSL https://fx.sh/setup.sh | bash
 ```
 
+### Windows
+
+Windows builds are published as `fx-windows-x86_64.zip` on the
+[releases page](https://github.com/AppleLamps/fx/releases), with a `.sha256`
+beside each. The installer above is POSIX-only and does not install them, so
+download and extract the archive yourself.
+
+**Windows support is experimental and incomplete.** The interactive terminal UI
+is unsupported, background processes are unavailable, and browser sign-in
+(`fx login`) has no working callback listener yet. Treat these builds as a work
+in progress rather than a way to run fx day to day —
+[`docs/windows-port.md`](docs/windows-port.md) tracks what is implemented and
+what is not.
+
 ## Run fx
 
 Sign in with Vercel AI Gateway:

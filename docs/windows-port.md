@@ -1,9 +1,9 @@
 # Windows platform port — scope, sequencing, and phase plan
 
-Status: phases 0 through 3 are implemented, phase 4's foundation is, and phase 5
-has landed; see the phase reports linked below. Phases 2, 3, and 4 are not
-verified end to end. This document remains the plan of record for the scope and
-sequencing; the code lives in the tree.
+Status: phases 0 through 3 are implemented, phase 4 landed its foundation only,
+and phase 5 has landed; see the phase reports linked below. Phases 2, 3, and 4
+are not verified end to end. This document remains the plan of record for the
+scope and sequencing; the code lives in the tree.
 
 > **Phase 5 landed CI and release, and found the gap the earlier phases left.**
 > Windows is now cross-compiled on every pull request, built and smoke-tested on
