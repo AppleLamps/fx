@@ -52,7 +52,7 @@ Then inside the WSL terminal:
 ```bash
 curl -fsSL https://fx.sh/setup.sh | bash
 exec $SHELL                     # or open a new terminal so fx is on PATH
-cd /mnt/c/Users/you/your_project # a Windows checkout, reachable under /mnt/<drive>/...
+cd /mnt/c/Users/<you>/your_project # a Windows checkout, reachable under /mnt/<drive>/...
 fx
 ```
 

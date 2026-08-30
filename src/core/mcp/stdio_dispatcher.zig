@@ -1920,14 +1920,22 @@ fn createShellDispatcher(script: []const u8) !struct {
 }
 
 fn expectProcessReaped(pid: std.posix.pid_t) !void {
-    for (0..100) |_| {
-        std.posix.kill(pid, @enumFromInt(0)) catch |err| switch (err) {
-            error.ProcessNotFound => return,
-            else => {},
-        };
-        io_mod.sleep(5 * std.time.ns_per_ms);
+    // The POSIX body lives inside a comptime-known branch rather than after
+    // a comptime return: code following a comptime return is still analyzed,
+    // and merely analyzing `std.posix.kill` emits a `kill` symbol Windows
+    // libc cannot resolve, which fails the test binary's link.
+    if (comptime builtin.os.tag == .windows or builtin.os.tag == .wasi) {
+        return;
+    } else {
+        for (0..100) |_| {
+            std.posix.kill(pid, @enumFromInt(0)) catch |err| switch (err) {
+                error.ProcessNotFound => return,
+                else => {},
+            };
+            io_mod.sleep(5 * std.time.ns_per_ms);
+        }
+        return error.TestProcessStillRunning;
     }
-    return error.TestProcessStillRunning;
 }
 
 test "one dispatcher keeps reversed concurrent responses with their requests" {

@@ -498,52 +498,59 @@ fn signalProcess(
 fn signalPidTree(root_pid: std.posix.pid_t) std.posix.KillError!void {
     // Background processes are deferred from the Windows v1 surface, and this
     // routine is signal- and process-group-shaped throughout. Job Objects
-    // replace it in phase 2.
-    if (comptime builtin.os.tag == .windows) return error.ProcessNotFound;
-    const descendants = collectDescendantPids(
-        std.heap.page_allocator,
-        root_pid,
-    ) catch |err| fallback: {
-        debug_trace.logf(
-            "background",
-            "could not inspect background process descendants pid={d} err={s}",
-            .{ root_pid, @errorName(err) },
-        );
-        break :fallback &[_]std.posix.pid_t{};
-    };
-    defer if (descendants.len > 0) {
-        std.heap.page_allocator.free(descendants);
-    };
-
-    var signaled = false;
-    var first_error: ?std.posix.KillError = null;
-    sendSignal(-root_pid, std.posix.SIG.TERM, &signaled, &first_error);
-    for (descendants) |pid| {
-        sendSignal(pid, std.posix.SIG.TERM, &signaled, &first_error);
-    }
-    sendSignal(root_pid, std.posix.SIG.TERM, &signaled, &first_error);
-    if (!signaled) return first_error orelse error.ProcessNotFound;
-
-    waitForProcessTreeExit(root_pid, descendants, 250);
-    var force_killed = false;
-    for (descendants) |pid| {
-        if (!isPidRunningRaw(pid)) continue;
-        sendSignal(pid, std.posix.SIG.KILL, &force_killed, &first_error);
-    }
-    if (isPidRunningRaw(root_pid)) {
-        sendSignal(
+    // replace it in phase 2. The POSIX body lives inside a comptime-known
+    // branch rather than after a comptime return: code following a comptime
+    // return is still analyzed, and merely analyzing `std.posix.kill` emits
+    // a `kill` symbol Windows libc cannot resolve, which fails the test
+    // binary's link.
+    if (comptime builtin.os.tag == .windows) {
+        return error.ProcessNotFound;
+    } else {
+        const descendants = collectDescendantPids(
+            std.heap.page_allocator,
             root_pid,
-            std.posix.SIG.KILL,
-            &force_killed,
-            &first_error,
-        );
-    }
-    if (force_killed) {
-        debug_trace.logf(
-            "background",
-            "force-killed lingering background process tree pid={d}",
-            .{root_pid},
-        );
+        ) catch |err| fallback: {
+            debug_trace.logf(
+                "background",
+                "could not inspect background process descendants pid={d} err={s}",
+                .{ root_pid, @errorName(err) },
+            );
+            break :fallback &[_]std.posix.pid_t{};
+        };
+        defer if (descendants.len > 0) {
+            std.heap.page_allocator.free(descendants);
+        };
+
+        var signaled = false;
+        var first_error: ?std.posix.KillError = null;
+        sendSignal(-root_pid, std.posix.SIG.TERM, &signaled, &first_error);
+        for (descendants) |pid| {
+            sendSignal(pid, std.posix.SIG.TERM, &signaled, &first_error);
+        }
+        sendSignal(root_pid, std.posix.SIG.TERM, &signaled, &first_error);
+        if (!signaled) return first_error orelse error.ProcessNotFound;
+
+        waitForProcessTreeExit(root_pid, descendants, 250);
+        var force_killed = false;
+        for (descendants) |pid| {
+            if (!isPidRunningRaw(pid)) continue;
+            sendSignal(pid, std.posix.SIG.KILL, &force_killed, &first_error);
+        }
+        if (isPidRunningRaw(root_pid)) {
+            sendSignal(
+                root_pid,
+                std.posix.SIG.KILL,
+                &force_killed,
+                &first_error,
+            );
+        }
+        if (force_killed) {
+            debug_trace.logf(
+                "background",
+                "force-killed lingering background process tree pid={d}",
+                .{root_pid},
+            );
+        }
     }
 }
 
@@ -810,20 +817,25 @@ fn waitForProcessExit(
 }
 
 fn processExists(pid_text: []const u8) bool {
+    // The POSIX body lives inside the switch prong rather than after it:
+    // code following a comptime-known return is still analyzed, and merely
+    // analyzing `std.posix.kill` emits a `kill` symbol Windows libc cannot
+    // resolve, which fails the test binary's link.
     switch (builtin.os.tag) {
         .windows, .wasi => return true,
-        else => {},
+        else => {
+            const pid = std.fmt.parseInt(
+                std.posix.pid_t,
+                pid_text,
+                10,
+            ) catch return false;
+            std.posix.kill(pid, @enumFromInt(0)) catch |err| switch (err) {
+                error.ProcessNotFound => return false,
+                else => return true,
+            };
+            return true;
+        },
     }
-    const pid = std.fmt.parseInt(
-        std.posix.pid_t,
-        pid_text,
-        10,
-    ) catch return false;
-    std.posix.kill(pid, @enumFromInt(0)) catch |err| switch (err) {
-        error.ProcessNotFound => return false,
-        else => return true,
-    };
-    return true;
 }
 
 fn expectBlockedWrapperDoesNotExecute(

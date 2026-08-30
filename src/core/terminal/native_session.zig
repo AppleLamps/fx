@@ -655,6 +655,17 @@ fn waitLauncherChild(child: *std.process.Child) !std.process.Child.Term {
 
 pub const Registry = if (isSupported()) SupportedRegistry else UnsupportedRegistry;
 
+// Compile and test the Windows ConPTY backend on Windows targets even while
+// the public gate above still reports `.unsupported` for Windows. The gate
+// flip happens only after the backend, console input, and login are verified
+// end to end on a real Windows host (docs/windows-port-finalization.md). On
+// non-Windows targets this import is not analyzed.
+comptime {
+    if (builtin.os.tag == .windows) {
+        _ = @import("windows_session.zig");
+    }
+}
+
 const UnsupportedRegistry = struct {
     alloc: Allocator,
 

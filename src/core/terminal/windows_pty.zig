@@ -198,7 +198,7 @@ const Procs = struct {
 };
 
 /// A terminal size in cells.
-const Size = struct {
+pub const Size = struct {
     columns: u16,
     rows: u16,
 
@@ -220,13 +220,13 @@ const Size = struct {
 /// the child drew. The other two ends belong to the pseudoconsole, which
 /// duplicates them at creation, so they are closed here immediately — holding
 /// them would keep `output` from ever reaching EOF.
-const PseudoConsole = struct {
+pub const PseudoConsole = struct {
     handle: HPCON,
     input: windows.HANDLE,
     output: windows.HANDLE,
     procs: Procs,
 
-    fn create(size: Size) Error!PseudoConsole {
+    pub fn create(size: Size) Error!PseudoConsole {
         if (comptime !supported) return error.PseudoConsoleUnavailable;
         const coord = try size.toCoord();
         const procs = try Procs.resolve();
@@ -266,7 +266,7 @@ const PseudoConsole = struct {
 
     /// Tells the child its window changed. The POSIX counterpart is
     /// `TIOCSWINSZ` plus `SIGWINCH`; ConPTY delivers both effects itself.
-    fn resize(self: PseudoConsole, size: Size) Error!void {
+    pub fn resize(self: PseudoConsole, size: Size) Error!void {
         if (comptime !supported) return error.PseudoConsoleUnavailable;
         const coord = try size.toCoord();
         if (self.procs.resize(self.handle, coord) != 0) return error.PseudoConsoleResizeFailed;
@@ -275,7 +275,7 @@ const PseudoConsole = struct {
     /// Closing the pseudoconsole is what tells a well-behaved child to exit,
     /// so this is the graceful stop. It also releases the duplicated pipe
     /// ends, which is what finally lets a reader on `output` see EOF.
-    fn close(self: *PseudoConsole) void {
+    pub fn close(self: *PseudoConsole) void {
         if (comptime !supported) return;
         self.procs.close(self.handle);
         windows.CloseHandle(self.input);
@@ -297,7 +297,7 @@ const PseudoConsole = struct {
 /// The failure is also detectable at the one moment it costs nothing: the
 /// child is still suspended and has run no instruction, so refusing to
 /// continue leaves nothing behind. `spawnAttached` terminates it and fails.
-const Child = struct {
+pub const Child = struct {
     process: windows.HANDLE,
     thread: windows.HANDLE,
     id: u32,
@@ -310,12 +310,12 @@ const Child = struct {
     /// deadlock phase 2 shipped and had to fix. Because containment is
     /// established before this type exists, the guarantee holds for every
     /// `Child`; there is no weaker path to fall back to.
-    fn terminate(self: Child, exit_code: u32) void {
+    pub fn terminate(self: Child, exit_code: u32) void {
         if (comptime !supported) return;
         self.job.terminate(exit_code) catch {};
     }
 
-    fn close(self: *Child) void {
+    pub fn close(self: *Child) void {
         if (comptime !supported) return;
         self.job.close();
         windows.CloseHandle(self.thread);
@@ -399,7 +399,7 @@ fn commandLineAlloc(alloc: Allocator, argv: []const []const u8) ![:0]u16 {
 /// A job that cannot be created or assigned **fails the spawn**: the still
 /// suspended child is terminated and an error returned, rather than handing
 /// back a tree nothing could later reach. See `Child`.
-fn spawnAttached(
+pub fn spawnAttached(
     alloc: Allocator,
     pty: PseudoConsole,
     argv: []const []const u8,

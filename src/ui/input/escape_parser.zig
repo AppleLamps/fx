@@ -10,6 +10,15 @@ pub const MouseInput = struct {
     row: u16 = 0,
     sgr_bytes: u8 = 0,
     discard_remaining: u8 = 0,
+    // Scratch fields for win32-input-mode reports. Mouse stages and win32
+    // stages never run concurrently, so one accumulator is shared; `reset`
+    // clears them at every stage boundary like the mouse fields.
+    win32_vk: u16 = 0,
+    win32_scan: u16 = 0,
+    win32_char: u16 = 0,
+    win32_key_down: u16 = 0,
+    win32_state: u16 = 0,
+    win32_field: u8 = win32_scan_field,
 
     pub fn reset(self: *MouseInput) void {
         self.* = .{};
@@ -41,6 +50,20 @@ const shift_modifier: u16 = 0x01;
 const alt_modifier: u16 = 0x02;
 const ctrl_modifier: u16 = 0x04;
 const super_modifier: u16 = 0x08;
+
+// win32-input-mode (`CSI ?9001 h`) reports `ESC[VK;Scan;Char;KeyDown;State;Repeat_`.
+// The first parameter accumulates through the ordinary CSI param stages, then
+// the `_` terminator switches to the dedicated win32 field stages below.
+const win32_input_field_stage: u8 = 17;
+const win32_vk_field: u8 = 0;
+const win32_scan_field: u8 = 1;
+const win32_char_field: u8 = 2;
+const win32_key_down_field: u8 = 3;
+const win32_state_field: u8 = 4;
+const win32_repeat_field: u8 = 5;
+const win32_shift_state: u16 = 0x0010;
+const win32_ctrl_state_mask: u16 = 0x000c; // LEFT | RIGHT
+const win32_alt_state_mask: u16 = 0x0003; // LEFT | RIGHT
 
 fn composerMove(kind: input_action.MoveKind, modifiers: u16) InputEscapeAction {
     return .{ .composer_shortcut = .{ .move = .{
@@ -164,6 +187,83 @@ pub fn controlByteFeatureAction(byte: u8) ?InputEscapeAction {
         15 => .toggle_full_transcript,
         else => null,
     };
+}
+
+// Store one completed win32-input-mode field before the next `;` or the final
+// `_`. Field order: VK;Scan;Char;KeyDown;State;Repeat. The repeat count is
+// parsed but unused; every report is one action.
+fn storeWin32Field(mouse: *MouseInput, value: u16) void {
+    switch (mouse.win32_field) {
+        win32_scan_field => mouse.win32_scan = value,
+        win32_char_field => mouse.win32_char = value,
+        win32_key_down_field => mouse.win32_key_down = value,
+        win32_state_field => mouse.win32_state = value,
+        else => {},
+    }
+    if (mouse.win32_field < win32_repeat_field) mouse.win32_field += 1;
+}
+
+fn win32KittyKeycode(vk: u16, char: u16) u16 {
+    if (char >= 0x20 and char < 0x7f) return char;
+    if (vk >= 'A' and vk <= 'Z') return vk + 32;
+    return vk;
+}
+
+// Translate one win32-input-mode key event into the same action space as
+// Kitty CSI u reports so Windows input keeps fx's exact key semantics.
+fn win32InputKeyAction(vk: u16, char: u16, key_down: u16, state: u16) InputEscapeAction {
+    // Release events must not trigger actions, mirroring the kitty rule that
+    // only press and repeat are actionable.
+    if (key_down == 0) return .ignore;
+
+    const shift = (state & win32_shift_state) != 0;
+    const ctrl = (state & win32_ctrl_state_mask) != 0;
+    const alt = (state & win32_alt_state_mask) != 0;
+
+    if (alt and !ctrl) {
+        return kittyUnicodeKeyAction(win32KittyKeycode(vk, char), alt_modifier, false);
+    }
+    if (ctrl) {
+        if (vk == 13) return .steer_submit;
+        if (vk >= 'A' and vk <= 'Z') return .{ .remapped_byte = @intCast(vk - 64) };
+        if (vk == 37) return composerMove(.word_left, ctrl_modifier);
+        if (vk == 39) return composerMove(.word_right, ctrl_modifier);
+        if (vk == 36) return composerMove(.draft_start, ctrl_modifier);
+        if (vk == 35) return composerMove(.draft_end, ctrl_modifier);
+        return .ignore;
+    }
+
+    if (vk == 13) return if (shift) .insert_newline else .{ .remapped_byte = '\r' };
+    if (vk == 9) return if (shift) .toggle_permission_mode else .{ .remapped_byte = '\t' };
+    if (vk == 8) return .{ .remapped_byte = 127 };
+    if (vk == 27) return .escape;
+    if (vk == 46) return .delete_next;
+    if (vk == 33) return .page_up;
+    if (vk == 34) return .page_down;
+    if (vk == 36) return .home;
+    if (vk == 35) return .end;
+    switch (vk) {
+        38 => return if (shift)
+            modifiedArrowAction('A', shift_modifier, false) orelse .cursor_up
+        else
+            .cursor_up,
+        40 => return if (shift)
+            modifiedArrowAction('B', shift_modifier, false) orelse .cursor_down
+        else
+            .cursor_down,
+        37 => return if (shift)
+            modifiedArrowAction('D', shift_modifier, false) orelse .cursor_left
+        else
+            .cursor_left,
+        39 => return if (shift)
+            modifiedArrowAction('C', shift_modifier, false) orelse .cursor_right
+        else
+            .cursor_right,
+        else => {},
+    }
+    if (char >= 0x20 and char < 0x7f) return .{ .remapped_byte = @intCast(char) };
+    if (vk >= 'A' and vk <= 'Z') return .{ .remapped_byte = @intCast(vk + 32) };
+    return .ignore;
 }
 
 pub const MouseReportDiscardResult = enum {
@@ -516,6 +616,15 @@ pub fn consumeInputEscapeByteWithMouse(
                 // Single-parameter CSI u: no `;`, so modifiers == 0.
                 return kittyUnicodeKeyAction(value, 0, meta_prefixed);
             }
+            // A `_` terminator here is a win32-input-mode report with only the
+            // VK parameter present; later fields arrive in the dedicated stage.
+            if (byte == '_') {
+                mouse.win32_vk = param.*;
+                mouse.win32_field = win32_scan_field;
+                setBaseEscapeStage(stage, win32_input_field_stage);
+                param.* = 0;
+                return null;
+            }
             if (byte != '~') return beginControlSequenceDiscard(stage, param, param2, mouse, byte);
 
             const value = param.*;
@@ -559,10 +668,24 @@ pub fn consumeInputEscapeByteWithMouse(
             }
 
             if (byte == ';') {
-                // Reuse the two accumulators for `ESC[27;modifier;keycode~`.
+                // Stash the first parameter so a win32-input-mode report can
+                // reach the collector stage with its VK intact; kitty paths
+                // never read the scratch field and reset it on termination.
+                mouse.win32_vk = param2.*;
                 param2.* = param.*;
                 param.* = 0;
                 setBaseEscapeStage(stage, 6);
+                return null;
+            }
+
+            // Two params then `_`: win32-input-mode with VK and scan code.
+            if (byte == '_') {
+                mouse.win32_vk = param2.*;
+                mouse.win32_scan = param.*;
+                mouse.win32_field = win32_char_field;
+                setBaseEscapeStage(stage, win32_input_field_stage);
+                param.* = 0;
+                param2.* = 0;
                 return null;
             }
 
@@ -654,6 +777,26 @@ pub fn consumeInputEscapeByteWithMouse(
                 return kittyUnicodeKeyAction(keycode, modifiers, meta_prefixed);
             }
 
+            // Three params then `;`: a win32-input-mode report continues into
+            // the collector stage with its remaining fields.
+            if (byte == ';') {
+                mouse.win32_scan = param2.*;
+                mouse.win32_char = param.*;
+                mouse.win32_field = win32_key_down_field;
+                setBaseEscapeStage(stage, win32_input_field_stage);
+                param.* = 0;
+                param2.* = 0;
+                return null;
+            }
+
+            // Three params then `_`: a truncated win32-input-mode press with
+            // no modifier state.
+            if (byte == '_') {
+                const action = win32InputKeyAction(mouse.win32_vk, param.*, 1, 0);
+                resetMouseEscapeDecode(stage, param, param2, mouse);
+                return action;
+            }
+
             return beginControlSequenceDiscard(stage, param, param2, mouse, byte);
         },
         // Kitty key reports with an event type: `ESC[27;modifier:event-type u`.
@@ -671,6 +814,32 @@ pub fn consumeInputEscapeByteWithMouse(
                     return kittyUnicodeKeyAction(27, modifiers, false);
                 }
                 return .ignore;
+            }
+            return beginControlSequenceDiscard(stage, param, param2, mouse, byte);
+        },
+        // win32-input-mode field collector: entered from the CSI param stages
+        // once a report has more parameters than kitty uses, and terminated by
+        // `_`. Fields land in MouseInput scratch in wire order.
+        win32_input_field_stage => {
+            if (byte >= '0' and byte <= '9') {
+                appendCsiDigitSaturating(param, byte);
+                return null;
+            }
+            if (byte == ';') {
+                storeWin32Field(mouse, param.*);
+                param.* = 0;
+                return null;
+            }
+            if (byte == '_') {
+                storeWin32Field(mouse, param.*);
+                const action = win32InputKeyAction(
+                    mouse.win32_vk,
+                    mouse.win32_char,
+                    mouse.win32_key_down,
+                    mouse.win32_state,
+                );
+                resetMouseEscapeDecode(stage, param, param2, mouse);
+                return action;
             }
             return beginControlSequenceDiscard(stage, param, param2, mouse, byte);
         },
@@ -759,4 +928,64 @@ pub fn consumeInputEscapeByteWithMouse(
             return null;
         },
     }
+}
+
+fn feedWin32Report(report: []const u8) InputEscapeAction {
+    var stage: u8 = 1;
+    var param: u16 = 0;
+    var param2: u16 = 0;
+    var mouse = MouseInput{};
+    var action: ?InputEscapeAction = null;
+    for (report) |byte| {
+        action = consumeInputEscapeByteWithMouse(&stage, &param, &param2, &mouse, byte);
+    }
+    return action.?;
+}
+
+test "win32-input-mode Enter press decodes to carriage return and release to ignore" {
+    try std.testing.expectEqual(
+        InputEscapeAction{ .remapped_byte = '\r' },
+        feedWin32Report("[13;28;13;1;0;1_"),
+    );
+    try std.testing.expectEqual(
+        InputEscapeAction.ignore,
+        feedWin32Report("[13;28;13;0;0;1_"),
+    );
+}
+
+test "win32-input-mode Ctrl+Enter decodes to steer submit" {
+    try std.testing.expectEqual(
+        InputEscapeAction.steer_submit,
+        feedWin32Report("[13;28;10;1;8;1_"),
+    );
+}
+
+test "win32-input-mode Shift+Enter decodes to insert newline" {
+    try std.testing.expectEqual(
+        InputEscapeAction.insert_newline,
+        feedWin32Report("[13;28;13;1;16;1_"),
+    );
+}
+
+test "win32-input-mode arrows and Escape decode to navigation actions" {
+    try std.testing.expectEqual(InputEscapeAction.cursor_up, feedWin32Report("[38;72;0;1;0;1_"));
+    try std.testing.expectEqual(InputEscapeAction.cursor_down, feedWin32Report("[40;80;0;1;0;1_"));
+    try std.testing.expectEqual(InputEscapeAction.cursor_left, feedWin32Report("[37;75;0;1;0;1_"));
+    try std.testing.expectEqual(InputEscapeAction.cursor_right, feedWin32Report("[39;77;0;1;0;1_"));
+    try std.testing.expectEqual(InputEscapeAction.escape, feedWin32Report("[27;1;27;1;0;1_"));
+}
+
+test "win32-input-mode Ctrl+C decodes to control byte 3" {
+    const action = feedWin32Report("[67;46;3;1;8;1_");
+    try std.testing.expectEqual(@as(u8, 3), action.remapped_byte);
+}
+
+test "win32-input-mode printable character decodes to its character" {
+    const action = feedWin32Report("[65;30;97;1;0;1_");
+    try std.testing.expectEqual(@as(u8, 'a'), action.remapped_byte);
+}
+
+test "win32-input-mode Backspace decodes to 127" {
+    const action = feedWin32Report("[8;14;8;1;0;1_");
+    try std.testing.expectEqual(@as(u8, 127), action.remapped_byte);
 }

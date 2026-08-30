@@ -48,6 +48,13 @@ pub const default_stdout_file: std.Io.File = if (is_windows)
 else
     std.Io.File.stdout();
 
+/// Resolves the standard-output file at runtime. Required on Windows, where
+/// `default_stdout_file` is only an invalid-handle placeholder and any write
+/// through it fails with `NotOpenForWriting`.
+pub fn stdoutFile() std.Io.File {
+    return if (is_windows) std.Io.File.stdout() else default_stdout_file;
+}
+
 /// The process's standard input handle. Reads the PEB on Windows, so this
 /// must be called at runtime rather than folded into a comptime value.
 pub fn stdin() std.posix.fd_t {
